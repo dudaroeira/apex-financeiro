@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{--navy:#1F3864;--blue:#2E75B6;--green:#1D9E75;--red:#E24B4A;--amber:#BA7517;
 --bg:#F4F6F9;--card:#FFFFFF;--line:#E3E8F0;--txt:#1B2433;--mut:#6B7686;--mut2:#9AA4B2;}
@@ -124,8 +125,8 @@ canvas{max-width:100%;}
 <div class="modal" id="modal"><div class="sheet">
   <h2 id="modalTitle">Carregar posição</h2>
   <p class="hint">Selecione o PDF de "Composição Saldo Diário". O app tenta extrair os campos — confira antes de salvar. Se a data já existir, ela é substituída.</p>
-  <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher o PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
-  <input type="file" id="pdf" accept="application/pdf" style="display:none" onchange="onPdf(event)">
+  <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher o PDF ou imagem (PNG/JPG)<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
+  <input type="file" id="pdf" accept="application/pdf,image/*" style="display:none" onchange="onFile(event)">
   <div class="fields">
     <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
     <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
@@ -333,7 +334,7 @@ function drawChart(){
 
 function openModal(){if(!isManager)return;fillForm({});document.getElementById('modalTitle').textContent='Carregar posição';document.getElementById('modal').classList.add('on');}
 function editPos(i){if(!isManager)return;closeMenu();fillForm(DATA[i]);document.getElementById('modalTitle').textContent='Corrigir posição';document.getElementById('dropTxt').innerHTML='Substituir por novo PDF<br><span style="font-size:11px">(ou edite os campos)</span>';document.getElementById('modal').classList.add('on');}
-function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher o PDF<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
+function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher o PDF ou imagem (PNG/JPG)<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
 function setF(id,v){document.getElementById(id).value=(v===0||v)?v:'';}
 function fillForm(o){o=o||{};setF('f_date',o.date||'');setF('f_saldos',o.saldos||'');setF('f_disp',o.disp);setF('f_t1',o.t1);setF('f_t2',o.t2);setF('f_t3',o.t3);setF('f_bloq',o.bloq);setF('f_car',o.car);setF('f_emp',o.emp);setF('f_ctr',o.ctr);setF('f_cgl',o.cgl);setF('f_cgu',o.cgu);setF('f_chl',o.chl);setF('f_chu',o.chu);setF('f_div',o.div);setF('f_res',o.res);}
 async function savePos(){
@@ -384,13 +385,22 @@ async function importBackup(ev){
   ev.target.value='';
 }
 
-async function onPdf(ev){
-  const f=ev.target.files[0];if(!f)return;document.getElementById('dropTxt').textContent='Lendo '+f.name+'…';
+async function onFile(ev){
+  const f=ev.target.files[0];if(!f)return;const dt=document.getElementById('dropTxt');
   try{
-    const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;let txt='';
-    for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
-    fillForm(extract(txt));document.getElementById('dropTxt').innerHTML='✓ '+f.name+' lido — <b>confira os campos</b>';
-  }catch(e){document.getElementById('dropTxt').textContent='Não consegui ler o PDF. Preencha manualmente.';}
+    let txt='';
+    if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){
+      dt.textContent='Lendo PDF '+f.name+'…';
+      const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
+    } else {
+      dt.textContent='Lendo imagem '+f.name+'… (OCR pode levar alguns segundos)';
+      const r=await Tesseract.recognize(f,'por');
+      txt=r.data.text;
+    }
+    fillForm(extract(txt));
+    dt.innerHTML='✓ '+f.name+' lido — <b>confira os campos com atenção</b>';
+  }catch(e){dt.textContent='Não consegui ler o arquivo ('+(e.message||'erro')+'). Preencha manualmente.';}
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
