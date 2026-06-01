@@ -161,7 +161,8 @@ canvas{max-width:100%;}
   <button class="bigbtn mgrOnly" onclick="document.getElementById('imp').click()"><span class="ic">&#8613;</span><span><b>Importar backup</b><small>Envia posições de um .json para a nuvem</small></span></button>
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
   <div class="msect" id="manageHdr">POSIÇÕES SALVAS</div>
-  <div id="manageList"></div>
+  <input id="mgFilter" oninput="renderManage()" placeholder="Filtrar por data (ex.: 06/2026)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:8px;">
+  <div id="manageList" style="max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;"></div>
   <div class="msect">RELATÓRIOS (PDF) — posição selecionada</div>
   <button class="bigbtn" onclick="pdfPosicao()"><span class="ic">&#128196;</span><span><b>Posição de Saldo (completa)</b><small>Cópia fiel da aba, ajustada para A4</small></span></button>
   <div style="display:flex;align-items:center;gap:8px;margin:2px 2px 10px;">
@@ -367,7 +368,7 @@ async function savePos(){
   closeModal();await loadCloud();CUR=DATA.findIndex(d=>d.date===o.date);render();
 }
 
-function openMenu(){renderManage();document.getElementById('seekNote').textContent='';document.getElementById('menu').classList.add('on');}
+function openMenu(){const mf=document.getElementById('mgFilter');if(mf)mf.value='';renderManage();document.getElementById('seekNote').textContent='';document.getElementById('menu').classList.add('on');}
 function closeMenu(){document.getElementById('menu').classList.remove('on');}
 function seekDate(v){
   if(!v||!DATA.length)return;const target=+v.replace(/-/g,'');let best=0,bd=Infinity,exact=false;
@@ -376,9 +377,13 @@ function seekDate(v){
 }
 function renderManage(){
   const list=document.getElementById('manageList');sortData();
+  const fEl=document.getElementById('mgFilter');const fv=fEl?fEl.value.trim():'';
   document.getElementById('manageHdr').textContent='POSIÇÕES SALVAS ('+DATA.length+')';
   if(!DATA.length){list.innerHTML='<div class="note" style="text-align:left">Nenhuma posição.</div>';return;}
-  list.innerHTML=DATA.map((d,i)=>i).reverse().map(i=>{
+  let idx=DATA.map((d,i)=>i).reverse();
+  if(fv)idx=idx.filter(i=>DATA[i].date.includes(fv));
+  if(!idx.length){list.innerHTML='<div class="note" style="text-align:left">Nada encontrado para "'+fv+'".</div>';return;}
+  list.innerHTML=idx.map(i=>{
     const acts=isManager?`<span class="act"><button onclick="editPos(${i})" aria-label="Corrigir">&#9998;</button><button class="del" onclick="removePos(${i})" aria-label="Remover">&#128465;</button></span>`:'';
     return `<div class="mrow"><span>${DATA[i].date} &nbsp;<span style="color:var(--mut);font-size:12px">${BRL(DATA[i].res)}</span></span>${acts}</div>`;}).join('');
 }
