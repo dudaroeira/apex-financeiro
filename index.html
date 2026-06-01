@@ -6,6 +6,8 @@
 <title>Apex Financeiro</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -124,9 +126,9 @@ canvas{max-width:100%;}
 
 <div class="modal" id="modal"><div class="sheet">
   <h2 id="modalTitle">Carregar posição</h2>
-  <p class="hint">Selecione a planilha Excel (.xlsx) — leitura exata — ou o PDF. Confira os campos antes de salvar. Se a data já existir, ela é substituída.</p>
+  <p class="hint">Selecione a planilha Excel (.xlsx) — leitura exata — ou o PDF. Pode escolher vários arquivos de uma vez (importação em lote). Confira antes de salvar; datas iguais são substituídas.</p>
   <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
-  <input type="file" id="pdf" accept=".xlsx,.xls,.csv,application/pdf" style="display:none" onchange="onFile(event)">
+  <input type="file" id="pdf" accept=".xlsx,.xls,.csv,application/pdf" multiple style="display:none" onchange="onFile(event)">
   <div class="fields">
     <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
     <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
@@ -160,7 +162,16 @@ canvas{max-width:100%;}
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
   <div class="msect" id="manageHdr">POSIÇÕES SALVAS</div>
   <div id="manageList"></div>
+  <div class="msect">RELATÓRIO</div>
+  <button class="bigbtn" onclick="pdfReport()"><span class="ic">&#128196;</span><span><b>Gerar PDF da posição atual</b><small>Resumo organizado para imprimir ou compartilhar</small></span></button>
   <div class="msect">CONTA</div>
+  <button class="bigbtn" onclick="togglePwd()"><span class="ic">&#128273;</span><span><b>Trocar senha</b><small>Definir uma nova senha de acesso</small></span></button>
+  <div id="pwdBox" class="hidden" style="margin:-2px 0 10px;">
+    <input id="pwd1" type="password" placeholder="Nova senha (mín. 6 caracteres)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;">
+    <input id="pwd2" type="password" placeholder="Repetir nova senha" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;">
+    <button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:14px;font-weight:600;cursor:pointer;" onclick="changePwd()">Salvar nova senha</button>
+    <div id="pwdMsg" style="font-size:12px;margin-top:8px;"></div>
+  </div>
   <button class="bigbtn" onclick="doLogout()"><span class="ic">&#9099;</span><span><b>Sair</b><small id="logoutWho"></small></span></button>
   <div class="btns"><button class="btn-s" onclick="closeMenu()">Fechar</button></div>
 </div></div>
@@ -402,23 +413,61 @@ function extractXlsx(buf){
   for(const k in NUM){const lbl=NUM[k][0],col=NUM[k][1];const r=findRow(lbl);const row=r>=0?grid[r]:null;o[k]=(row&&row[col]!=null)?brNum(row[col]):'';}
   return o;
 }
+async function parseFile(f){
+  const nm=f.name.toLowerCase();
+  if(/\.(xlsx|xls|csv)$/.test(nm)||/spreadsheet|excel/.test(f.type)){const buf=await f.arrayBuffer();return extractXlsx(buf);}
+  if(f.type==='application/pdf'||/\.pdf$/.test(nm)){let txt='';const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}return extract(txt);}
+  throw new Error('formato não suportado');
+}
+const NUMKEYS=['disp','t1','t2','t3','bloq','car','emp','ctr','cgl','cgu','chl','chu','div','res'];
+function toPayload(o){const p={date:o.date||'',saldos:o.saldos||''};NUMKEYS.forEach(k=>p[k]=parseBR(o[k]));return p;}
 async function onFile(ev){
-  const f=ev.target.files[0];if(!f)return;const dt=document.getElementById('dropTxt');
-  try{
-    const nm=f.name.toLowerCase();
-    if(/\.(xlsx|xls|csv)$/.test(nm)||/spreadsheet|excel/.test(f.type)){
-      dt.textContent='Lendo planilha '+f.name+'…';
-      const buf=await f.arrayBuffer();
-      fillForm(extractXlsx(buf));
-      dt.innerHTML='✓ '+f.name+' lido da planilha — <b>confira e salve</b>';
-    } else if(f.type==='application/pdf'||/\.pdf$/.test(nm)){
-      dt.textContent='Lendo PDF '+f.name+'…';
-      let txt='';const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-      for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
-      fillForm(extract(txt));
-      dt.innerHTML='✓ '+f.name+' lido — <b>confira os campos</b>';
-    } else { dt.textContent='Formato não suportado. Use Excel (.xlsx) ou PDF.'; }
-  }catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Preencha manualmente.';}
+  const files=[...ev.target.files];if(!files.length)return;const dt=document.getElementById('dropTxt');
+  if(files.length===1){
+    try{const o=await parseFile(files[0]);fillForm(o);dt.innerHTML='✓ '+files[0].name+' lido — <b>confira e salve</b>';}
+    catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Preencha manualmente.';}
+    ev.target.value='';return;
+  }
+  if(!isManager){dt.textContent='Apenas o gerente pode importar posições.';ev.target.value='';return;}
+  dt.textContent='Lendo '+files.length+' arquivos…';
+  const parsed=[],errs=[];
+  for(const f of files){try{const o=await parseFile(f);if(!/^\d{2}\/\d{2}\/\d{4}$/.test(o.date||''))throw 0;parsed.push(o);}catch(e){errs.push(f.name);}}
+  if(!parsed.length){dt.textContent='Nenhuma posição válida encontrada. Verifique os arquivos.';ev.target.value='';return;}
+  const msg='Importar '+parsed.length+' posição(ões)?\n'+parsed.map(p=>'• '+p.date).join('\n')+(errs.length?'\n\nNão lidos: '+errs.join(', '):'')+'\n\nDatas iguais serão substituídas.';
+  if(!confirm(msg)){dt.textContent='Importação cancelada.';ev.target.value='';return;}
+  const rows=parsed.map(o=>({posdate:o.date,payload:toPayload(o)}));
+  const {error}=await sb.from('positions').upsert(rows,{onConflict:'posdate'});
+  if(error){dt.textContent='Erro ao salvar: '+error.message;ev.target.value='';return;}
+  await loadCloud();dt.innerHTML='✓ '+parsed.length+' posições importadas';ev.target.value='';setTimeout(closeModal,1400);
+}
+function togglePwd(){document.getElementById('pwdBox').classList.toggle('hidden');document.getElementById('pwdMsg').textContent='';}
+async function changePwd(){
+  const a=document.getElementById('pwd1').value,b=document.getElementById('pwd2').value,m=document.getElementById('pwdMsg');
+  if(a.length<6){m.style.color='var(--red)';m.textContent='Mínimo 6 caracteres.';return;}
+  if(a!==b){m.style.color='var(--red)';m.textContent='As senhas não coincidem.';return;}
+  const {error}=await sb.auth.updateUser({password:a});
+  if(error){m.style.color='var(--red)';m.textContent='Erro: '+error.message;return;}
+  m.style.color='var(--green)';m.textContent='✓ Senha alterada com sucesso.';
+  document.getElementById('pwd1').value='';document.getElementById('pwd2').value='';
+}
+function pdfReport(){
+  if(!DATA.length){alert('Sem posição para gerar.');return;}
+  const p=DATA[CUR];const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
+  const navy=[31,56,100], blue=[46,117,182];const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
+  const money=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pj=p.t1+p.t3,pf=p.t2,cgFree=p.cgl-p.cgu,chFree=p.chl-p.chu;
+  doc.setFillColor(navy[0],navy[1],navy[2]);doc.rect(0,0,W,72,'F');
+  doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(16);doc.text('Apex Engenharia — Posição de Caixa',40,34);
+  doc.setFont(undefined,'normal');doc.setFontSize(10);doc.text('Posição em '+p.date+'   ·   saldos de '+p.saldos,40,52);
+  doc.setTextColor(0);
+  const tbl=(title,rows,y)=>{doc.autoTable({startY:y,head:[[title,'']],body:rows,theme:'grid',headStyles:{fillColor:blue,textColor:255,fontStyle:'bold',fontSize:11},bodyStyles:{fontSize:10},columnStyles:{0:{cellWidth:340},1:{halign:'right'}},styles:{cellPadding:5},margin:{left:40,right:40}});return doc.lastAutoTable.finalY;};
+  let y=92;
+  y=tbl('Resumo',[['Caixa líquido (Créditos − Dívidas)',money(p.res)],['Liquidez imediata (Total Disponível)',money(p.disp)],['Dívida líquida (total bancário)',money(p.div)]],y);
+  y=tbl('Liquidez por horizonte',[['Imediata D0 (Total Disponível)',money(p.disp)],['     PJ — caixa da Apex',money(pj)],['     PF — patrimônio dos sócios',money(pf)],['A liberar — créditos bloqueados (empreend.)',money(p.bloq)],['Com carência — LCIs dos sócios',money(p.car)]],y+16);
+  y=tbl('Dívida bancária',[['Empréstimos (BRB 30/11/26; Itaú BNDES 19/10/28)',money(p.emp)],['Contrato Lét Parque (099 Apex PJ)',money(p.ctr)],['Total geral dívidas bancárias',money(p.div)]],y+16);
+  y=tbl('Linhas disponíveis (fôlego contingente)',[['Contas garantidas — limite',money(p.cgl)],['Contas garantidas — disponível',money(cgFree)],['Cheque especial — limite',money(p.chl)],['Cheque especial — disponível',money(chFree)],['Total disponível sem captar nova dívida',money(cgFree+chFree)]],y+16);
+  doc.setFontSize(8);doc.setTextColor(120);doc.text('Gerado pelo app Apex Financeiro em '+new Date().toLocaleString('pt-BR'),40,H-24);
+  doc.save('Apex_Posicao_'+p.date.replace(/\//g,'-')+'.pdf');
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
