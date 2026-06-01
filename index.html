@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Apex Financeiro</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -123,9 +124,9 @@ canvas{max-width:100%;}
 
 <div class="modal" id="modal"><div class="sheet">
   <h2 id="modalTitle">Carregar posição</h2>
-  <p class="hint">Selecione o PDF de "Composição Saldo Diário". O app tenta extrair os campos — confira antes de salvar. Se a data já existir, ela é substituída.</p>
-  <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher o PDF ou imagem (PNG/JPG)<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
-  <input type="file" id="pdf" accept="application/pdf,image/*" style="display:none" onchange="onFile(event)">
+  <p class="hint">Selecione a planilha Excel (.xlsx) — leitura exata — ou o PDF. Confira os campos antes de salvar. Se a data já existir, ela é substituída.</p>
+  <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
+  <input type="file" id="pdf" accept=".xlsx,.xls,.csv,application/pdf" style="display:none" onchange="onFile(event)">
   <div class="fields">
     <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
     <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
@@ -333,7 +334,7 @@ function drawChart(){
 
 function openModal(){if(!isManager)return;fillForm({});document.getElementById('modalTitle').textContent='Carregar posição';document.getElementById('modal').classList.add('on');}
 function editPos(i){if(!isManager)return;closeMenu();fillForm(DATA[i]);document.getElementById('modalTitle').textContent='Corrigir posição';document.getElementById('dropTxt').innerHTML='Substituir por novo PDF<br><span style="font-size:11px">(ou edite os campos)</span>';document.getElementById('modal').classList.add('on');}
-function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher o PDF ou imagem (PNG/JPG)<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
+function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
 function setF(id,v){document.getElementById(id).value=(v===0||v)?v:'';}
 function fillForm(o){o=o||{};setF('f_date',o.date||'');setF('f_saldos',o.saldos||'');setF('f_disp',o.disp);setF('f_t1',o.t1);setF('f_t2',o.t2);setF('f_t3',o.t3);setF('f_bloq',o.bloq);setF('f_car',o.car);setF('f_emp',o.emp);setF('f_ctr',o.ctr);setF('f_cgl',o.cgl);setF('f_cgu',o.cgu);setF('f_chl',o.chl);setF('f_chu',o.chu);setF('f_div',o.div);setF('f_res',o.res);}
 async function savePos(){
@@ -384,26 +385,40 @@ async function importBackup(ev){
   ev.target.value='';
 }
 
-function fileToDataURL(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});}
+function normTxt(s){return (''+s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().split(/\s+/).filter(Boolean).join(' ');}
+function brNum(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number')return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});return ''+v;}
+function fmtDateCell(v){if(v instanceof Date)return ('0'+v.getDate()).slice(-2)+'/'+('0'+(v.getMonth()+1)).slice(-2)+'/'+v.getFullYear();return v?(''+v):'';}
+function extractXlsx(buf){
+  const wb=XLSX.read(buf,{type:'array',cellDates:true});
+  const sn=wb.SheetNames.find(n=>{const x=normTxt(n);return x.includes('posicao')&&x.includes('saldo');})||wb.SheetNames[0];
+  const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:null});
+  const findRow=sub=>{for(let r=0;r<grid.length;r++){const row=grid[r]||[];for(const c of row){if(c!=null&&normTxt(c).includes(sub))return r;}}return -1;};
+  const o={};
+  [['date','posicao em'],['saldos','saldos de']].forEach(([k,lbl])=>{
+    const r=findRow(lbl);if(r<0)return;const row=grid[r];
+    for(let ci=0;ci<row.length;ci++){if(row[ci]!=null&&normTxt(row[ci]).includes(lbl)){for(let cj=ci+1;cj<row.length;cj++){if(row[cj]!=null){o[k]=fmtDateCell(row[cj]);break;}}break;}}
+  });
+  const NUM={t1:['total 1',1],t2:['total 2',1],t3:['total 3',1],disp:['total disponivel',1],bloq:['total 4',1],car:['total 6',1],emp:['total emprestimos',5],ctr:['total posicao de divida contrato pj',5],cgl:['total contas garantidas',4],cgu:['total contas garantidas',5],chl:['total limite de cheque',4],chu:['total limite de cheque',5],div:['total geral dividas bancarias',5],res:['resultado (creditos',3]};
+  for(const k in NUM){const lbl=NUM[k][0],col=NUM[k][1];const r=findRow(lbl);const row=r>=0?grid[r]:null;o[k]=(row&&row[col]!=null)?brNum(row[col]):'';}
+  return o;
+}
 async function onFile(ev){
   const f=ev.target.files[0];if(!f)return;const dt=document.getElementById('dropTxt');
   try{
-    if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){
+    const nm=f.name.toLowerCase();
+    if(/\.(xlsx|xls|csv)$/.test(nm)||/spreadsheet|excel/.test(f.type)){
+      dt.textContent='Lendo planilha '+f.name+'…';
+      const buf=await f.arrayBuffer();
+      fillForm(extractXlsx(buf));
+      dt.innerHTML='✓ '+f.name+' lido da planilha — <b>confira e salve</b>';
+    } else if(f.type==='application/pdf'||/\.pdf$/.test(nm)){
       dt.textContent='Lendo PDF '+f.name+'…';
       let txt='';const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;
       for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
       fillForm(extract(txt));
       dt.innerHTML='✓ '+f.name+' lido — <b>confira os campos</b>';
-    } else {
-      dt.textContent='Lendo imagem '+f.name+' com IA…';
-      const dataUrl=await fileToDataURL(f);
-      const {data,error}=await sb.functions.invoke('extrair-posicao',{body:{image:dataUrl}});
-      if(error) throw error;
-      if(data && data.error) throw new Error(data.error);
-      fillForm(data);
-      dt.innerHTML='✓ imagem lida — <b>confira os campos com atenção</b>';
-    }
-  }catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Use PDF ou preencha manualmente.';}
+    } else { dt.textContent='Formato não suportado. Use Excel (.xlsx) ou PDF.'; }
+  }catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Preencha manualmente.';}
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
