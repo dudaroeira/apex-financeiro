@@ -162,8 +162,9 @@ canvas{max-width:100%;}
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
   <div class="msect" id="manageHdr">POSIÇÕES SALVAS</div>
   <div id="manageList"></div>
-  <div class="msect">RELATÓRIO</div>
-  <button class="bigbtn" onclick="pdfReport()"><span class="ic">&#128196;</span><span><b>Gerar PDF da posição atual</b><small>Resumo organizado para imprimir ou compartilhar</small></span></button>
+  <div class="msect">RELATÓRIOS (PDF) — posição selecionada</div>
+  <button class="bigbtn" onclick="pdfPosicao()"><span class="ic">&#128196;</span><span><b>Posição de Saldo (completa)</b><small>Cópia fiel da aba, ajustada para A4</small></span></button>
+  <button class="bigbtn" onclick="pdfDashboard()"><span class="ic">&#128202;</span><span><b>Painel Executivo (Dashboard)</b><small>Composições, alertas e previsão</small></span></button>
   <div class="msect">CONTA</div>
   <button class="bigbtn" onclick="togglePwd()"><span class="ic">&#128273;</span><span><b>Trocar senha</b><small>Definir uma nova senha de acesso</small></span></button>
   <div id="pwdBox" class="hidden" style="margin:-2px 0 10px;">
@@ -193,6 +194,7 @@ function dkey(d){const[a,b,c]=d.split("/");return c+b.padStart(2,"0")+a.padStart
 function toDate(d){const[a,b,c]=d.split("/");return new Date(+c,+b-1,+a);}
 
 let sb=null, DATA=[], CUR=-1, TAB="painel", chart=null, LIQVIEW="all", HISTPER="mes", isManager=false, userEmail="";
+let pendingDetail=null;
 const configured = SUPABASE_URL.indexOf("http")===0 && SUPABASE_ANON_KEY.length>20;
 
 function boot(){
@@ -343,8 +345,8 @@ function drawChart(){
     options:{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+' MM',font:{size:11}}},x:{ticks:{font:{size:11}}}}}});
 }
 
-function openModal(){if(!isManager)return;fillForm({});document.getElementById('modalTitle').textContent='Carregar posição';document.getElementById('modal').classList.add('on');}
-function editPos(i){if(!isManager)return;closeMenu();fillForm(DATA[i]);document.getElementById('modalTitle').textContent='Corrigir posição';document.getElementById('dropTxt').innerHTML='Substituir por novo PDF<br><span style="font-size:11px">(ou edite os campos)</span>';document.getElementById('modal').classList.add('on');}
+function openModal(){if(!isManager)return;pendingDetail=null;fillForm({});document.getElementById('modalTitle').textContent='Carregar posição';document.getElementById('modal').classList.add('on');}
+function editPos(i){if(!isManager)return;closeMenu();pendingDetail=(DATA[i]._pos||DATA[i]._dash)?{pos:DATA[i]._pos||null,dash:DATA[i]._dash||null}:null;fillForm(DATA[i]);document.getElementById('modalTitle').textContent='Corrigir posição';document.getElementById('dropTxt').innerHTML='Substituir por novo PDF<br><span style="font-size:11px">(ou edite os campos)</span>';document.getElementById('modal').classList.add('on');}
 function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
 function setF(id,v){document.getElementById(id).value=(v===0||v)?v:'';}
 function fillForm(o){o=o||{};setF('f_date',o.date||'');setF('f_saldos',o.saldos||'');setF('f_disp',o.disp);setF('f_t1',o.t1);setF('f_t2',o.t2);setF('f_t3',o.t3);setF('f_bloq',o.bloq);setF('f_car',o.car);setF('f_emp',o.emp);setF('f_ctr',o.ctr);setF('f_cgl',o.cgl);setF('f_cgu',o.cgu);setF('f_chl',o.chl);setF('f_chu',o.chu);setF('f_div',o.div);setF('f_res',o.res);}
@@ -352,6 +354,7 @@ async function savePos(){
   const g=id=>String(document.getElementById(id).value).trim();
   const o={date:g('f_date'),saldos:g('f_saldos'),disp:parseBR(g('f_disp')),t1:parseBR(g('f_t1')),t2:parseBR(g('f_t2')),t3:parseBR(g('f_t3')),bloq:parseBR(g('f_bloq')),car:parseBR(g('f_car')),emp:parseBR(g('f_emp')),ctr:parseBR(g('f_ctr')),cgl:parseBR(g('f_cgl')),cgu:parseBR(g('f_cgu')),chl:parseBR(g('f_chl')),chu:parseBR(g('f_chu')),div:parseBR(g('f_div')),res:parseBR(g('f_res'))};
   if(!/^\d{2}\/\d{2}\/\d{4}$/.test(o.date)){alert('Informe a data no formato DD/MM/AAAA.');return;}
+  if(pendingDetail){if(pendingDetail.pos)o._pos=pendingDetail.pos;if(pendingDetail.dash)o._dash=pendingDetail.dash;}
   const {error}=await sb.from('positions').upsert({posdate:o.date,payload:o},{onConflict:'posdate'});
   if(error){alert('Erro ao salvar: '+error.message);return;}
   closeModal();await loadCloud();CUR=DATA.findIndex(d=>d.date===o.date);render();
@@ -399,6 +402,9 @@ async function importBackup(ev){
 function normTxt(s){return (''+s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().split(/\s+/).filter(Boolean).join(' ');}
 function brNum(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number')return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});return ''+v;}
 function fmtDateCell(v){if(v instanceof Date)return ('0'+v.getDate()).slice(-2)+'/'+('0'+(v.getMonth()+1)).slice(-2)+'/'+v.getFullYear();return v?(''+v):'';}
+function cellStr(v){if(v===null||v===undefined)return '';if(v instanceof Date)return fmtDateCell(v);if(typeof v==='number')return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});return (''+v).trim();}
+function colGroup(grid,cols){const out=[];for(const row of grid){const vals=cols.map(c=>cellStr(row?row[c]:''));if(vals.some(x=>x!==''))out.push(vals);}return out;}
+function gridOf(wb,m){const sn=wb.SheetNames.find(m);if(!sn)return null;return XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:null});}
 function extractXlsx(buf){
   const wb=XLSX.read(buf,{type:'array',cellDates:true});
   const sn=wb.SheetNames.find(n=>{const x=normTxt(n);return x.includes('posicao')&&x.includes('saldo');})||wb.SheetNames[0];
@@ -411,6 +417,9 @@ function extractXlsx(buf){
   });
   const NUM={t1:['total 1',1],t2:['total 2',1],t3:['total 3',1],disp:['total disponivel',1],bloq:['total 4',1],car:['total 6',1],emp:['total emprestimos',5],ctr:['total posicao de divida contrato pj',5],cgl:['total contas garantidas',4],cgu:['total contas garantidas',5],chl:['total limite de cheque',4],chu:['total limite de cheque',5],div:['total geral dividas bancarias',5],res:['resultado (creditos',3]};
   for(const k in NUM){const lbl=NUM[k][0],col=NUM[k][1];const r=findRow(lbl);const row=r>=0?grid[r]:null;o[k]=(row&&row[col]!=null)?brNum(row[col]):'';}
+  o._pos={cred:colGroup(grid,[0,1]),div:colGroup(grid,[3,4,5]),res:colGroup(grid,[7,8])};
+  const dg=gridOf(wb,n=>normTxt(n)==='dashboard');
+  o._dash=dg?colGroup(dg,[1,2]):[];
   return o;
 }
 async function parseFile(f){
@@ -420,11 +429,11 @@ async function parseFile(f){
   throw new Error('formato não suportado');
 }
 const NUMKEYS=['disp','t1','t2','t3','bloq','car','emp','ctr','cgl','cgu','chl','chu','div','res'];
-function toPayload(o){const p={date:o.date||'',saldos:o.saldos||''};NUMKEYS.forEach(k=>p[k]=parseBR(o[k]));return p;}
+function toPayload(o){const p={date:o.date||'',saldos:o.saldos||''};NUMKEYS.forEach(k=>p[k]=parseBR(o[k]));if(o._pos)p._pos=o._pos;if(o._dash)p._dash=o._dash;return p;}
 async function onFile(ev){
   const files=[...ev.target.files];if(!files.length)return;const dt=document.getElementById('dropTxt');
   if(files.length===1){
-    try{const o=await parseFile(files[0]);fillForm(o);dt.innerHTML='✓ '+files[0].name+' lido — <b>confira e salve</b>';}
+    try{const o=await parseFile(files[0]);pendingDetail={pos:o._pos||null,dash:o._dash||null};fillForm(o);dt.innerHTML='✓ '+files[0].name+' lido — <b>confira e salve</b>';}
     catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Preencha manualmente.';}
     ev.target.value='';return;
   }
@@ -450,24 +459,43 @@ async function changePwd(){
   m.style.color='var(--green)';m.textContent='✓ Senha alterada com sucesso.';
   document.getElementById('pwd1').value='';document.getElementById('pwd2').value='';
 }
-function pdfReport(){
+function _hdr(doc,p,title){const W=doc.internal.pageSize.getWidth();doc.setFillColor(31,56,100);doc.rect(0,0,W,72,'F');doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(15);doc.text('Apex Engenharia — '+title,40,32);doc.setFont(undefined,'normal');doc.setFontSize(10);doc.text('Posição em '+(p.date||'')+'   ·   saldos de '+(p.saldos||''),40,52);doc.setTextColor(0);}
+function _ftr(doc){const H=doc.internal.pageSize.getHeight();doc.setFontSize(8);doc.setTextColor(120);doc.text('Documento Confidencial — Uso Exclusivo da Diretoria · gerado em '+new Date().toLocaleString('pt-BR'),40,H-20);doc.setTextColor(0);}
+function _clean(s){return (''+s).replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{2300}-\u{23FF}\u{2700}-\u{27BF}]/gu,'').replace(/\s+/g,' ').trim();}
+function _money(v){return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function pdfPosicao(){
   if(!DATA.length){alert('Sem posição para gerar.');return;}
   const p=DATA[CUR];const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
-  const navy=[31,56,100], blue=[46,117,182];const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
-  const money=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const pj=p.t1+p.t3,pf=p.t2,cgFree=p.cgl-p.cgu,chFree=p.chl-p.chu;
-  doc.setFillColor(navy[0],navy[1],navy[2]);doc.rect(0,0,W,72,'F');
-  doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(16);doc.text('Apex Engenharia — Posição de Caixa',40,34);
-  doc.setFont(undefined,'normal');doc.setFontSize(10);doc.text('Posição em '+p.date+'   ·   saldos de '+p.saldos,40,52);
-  doc.setTextColor(0);
-  const tbl=(title,rows,y)=>{doc.autoTable({startY:y,head:[[title,'']],body:rows,theme:'grid',headStyles:{fillColor:blue,textColor:255,fontStyle:'bold',fontSize:11},bodyStyles:{fontSize:10},columnStyles:{0:{cellWidth:340},1:{halign:'right'}},styles:{cellPadding:5},margin:{left:40,right:40}});return doc.lastAutoTable.finalY;};
-  let y=92;
-  y=tbl('Resumo',[['Caixa líquido (Créditos − Dívidas)',money(p.res)],['Liquidez imediata (Total Disponível)',money(p.disp)],['Dívida líquida (total bancário)',money(p.div)]],y);
-  y=tbl('Liquidez por horizonte',[['Imediata D0 (Total Disponível)',money(p.disp)],['     PJ — caixa da Apex',money(pj)],['     PF — patrimônio dos sócios',money(pf)],['A liberar — créditos bloqueados (empreend.)',money(p.bloq)],['Com carência — LCIs dos sócios',money(p.car)]],y+16);
-  y=tbl('Dívida bancária',[['Empréstimos (BRB 30/11/26; Itaú BNDES 19/10/28)',money(p.emp)],['Contrato Lét Parque (099 Apex PJ)',money(p.ctr)],['Total geral dívidas bancárias',money(p.div)]],y+16);
-  y=tbl('Linhas disponíveis (fôlego contingente)',[['Contas garantidas — limite',money(p.cgl)],['Contas garantidas — disponível',money(cgFree)],['Cheque especial — limite',money(p.chl)],['Cheque especial — disponível',money(chFree)],['Total disponível sem captar nova dívida',money(cgFree+chFree)]],y+16);
-  doc.setFontSize(8);doc.setTextColor(120);doc.text('Gerado pelo app Apex Financeiro em '+new Date().toLocaleString('pt-BR'),40,H-24);
-  doc.save('Apex_Posicao_'+p.date.replace(/\//g,'-')+'.pdf');
+  _hdr(doc,p,'Posição de Saldo');
+  const blue=[46,117,182];
+  if(p._pos){
+    let y=90;
+    const sec=(title,body,ncols,colStyles)=>{
+      doc.autoTable({startY:y,head:[[title].concat(Array(ncols-1).fill(''))],body:body.map(r=>{const a=r.map(_clean);while(a.length<ncols)a.push('');return a;}),theme:'grid',headStyles:{fillColor:blue,textColor:255,fontStyle:'bold',fontSize:10},styles:{fontSize:8,cellPadding:3},columnStyles:colStyles,margin:{left:40,right:40},
+        didParseCell:d=>{if(d.section==='body'&&d.row.raw.slice(1).every(x=>!x)){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor=[238,242,248];}}});
+      y=doc.lastAutoTable.finalY+14;
+    };
+    sec('CRÉDITOS',p._pos.cred,2,{0:{cellWidth:380},1:{halign:'right'}});
+    sec('DÍVIDAS BANCÁRIAS',p._pos.div,3,{0:{cellWidth:300},1:{halign:'right'},2:{halign:'right'}});
+    sec('RESUMO GERAL',p._pos.res,2,{0:{cellWidth:380},1:{halign:'right'}});
+  } else {
+    const pj=p.t1+p.t3,pf=p.t2,cgF=p.cgl-p.cgu,chF=p.chl-p.chu;
+    doc.autoTable({startY:90,head:[['Resumo (detalhe completo indisponível — reimporte o Excel)','']],body:[['Caixa líquido',_money(p.res)],['Liquidez imediata',_money(p.disp)],['  PJ',_money(pj)],['  PF',_money(pf)],['A liberar',_money(p.bloq)],['Com carência',_money(p.car)],['Empréstimos',_money(p.emp)],['Contrato Lét Parque',_money(p.ctr)],['Dívida total',_money(p.div)],['Contas garantidas livre',_money(cgF)],['Cheque livre',_money(chF)]],theme:'grid',headStyles:{fillColor:blue,textColor:255},styles:{fontSize:9,cellPadding:4},columnStyles:{0:{cellWidth:380},1:{halign:'right'}},margin:{left:40,right:40}});
+  }
+  _ftr(doc);doc.save('Apex_Posicao_'+(p.date||'').replace(/\//g,'-')+'.pdf');
+}
+function pdfDashboard(){
+  if(!DATA.length){alert('Sem posição para gerar.');return;}
+  const p=DATA[CUR];const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
+  _hdr(doc,p,'Painel Executivo (Dashboard)');
+  if(!p._dash||!p._dash.length){
+    doc.setFontSize(11);doc.text('Dashboard indisponível para esta posição.',40,110);
+    doc.text('Reimporte o Excel desta data para gerar este relatório.',40,128);
+    _ftr(doc);doc.save('Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');return;
+  }
+  doc.autoTable({startY:90,body:p._dash.map(r=>{const a=r.map(_clean);while(a.length<2)a.push('');return a;}),theme:'grid',styles:{fontSize:9,cellPadding:4},columnStyles:{0:{cellWidth:360},1:{halign:'right'}},margin:{left:40,right:40},
+    didParseCell:d=>{if(d.section==='body'){const raw=d.row.raw;const isHead=(!raw[1])||/PAINEL|COMPOSI|ALERTAS|PREVIS|EMPR|LINHAS|GRAFICOS|GRÁFICOS|CONFIDENC|POSI/i.test(_clean(raw[0]).toUpperCase());if(isHead){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor=[31,56,100];d.cell.styles.textColor=[255,255,255];}}}});
+  _ftr(doc);doc.save('Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
