@@ -87,6 +87,29 @@ canvas{max-width:100%;}
 #login .err{color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:18px;}
 #login .cfg{color:var(--amber);font-size:12px;text-align:center;margin-top:14px;line-height:1.5;}
 .hidden{display:none!important;}
+
+@media (min-width:860px){
+  body{background:var(--bg);}
+  #app{max-width:1040px;min-height:auto;margin:22px auto;border:1px solid var(--line);border-radius:16px;background:var(--card);display:flex;flex-direction:column;}
+  header{order:1;border-radius:16px 16px 0 0;}
+  nav{order:2;position:static;transform:none;left:auto;width:100%;max-width:none;height:auto;border-top:none;border-bottom:1px solid var(--line);justify-content:center;gap:10px;padding:8px;}
+  nav button{flex:0 0 auto;flex-direction:row;gap:8px;padding:10px 20px;font-size:14px;border-radius:10px;}
+  nav button.on{background:#E6EEF8;}
+  nav button svg{width:18px;height:18px;}
+  main{order:3;padding:26px 30px 34px;}
+  .fab{order:4;position:fixed;left:auto;right:30px;bottom:30px;transform:none;width:56px;height:56px;}
+  h1{font-size:22px;margin-bottom:18px;}
+  .kpi{padding:20px;}
+  .kpi .big{font-size:34px;} .kpi .big.sm{font-size:26px;} .kpi .lbl{font-size:14px;}
+  .row2{grid-template-columns:1fr 1fr;gap:16px;}
+  .card{padding:18px 20px;}
+  .sect{font-size:14px;margin:24px 0 10px;}
+  .line{font-size:14px;padding:9px 0;}
+  #main>h1,#main>.kpi,#main>.row2,#main>.sect,#main>.card,#main>.toggle,#main>.debt,#main>.note{max-width:880px;margin-left:auto;margin-right:auto;}
+  .modal{align-items:center;}
+  .sheet{max-width:560px;border-radius:18px;max-height:86vh;}
+}
+
 </style>
 </head>
 <body>
