@@ -210,7 +210,7 @@ function boot(){
     c.innerHTML='⚠ App ainda não configurado. Abra o arquivo e preencha SUPABASE_URL, SUPABASE_ANON_KEY e MANAGER_EMAIL (veja o guia).';
     return;
   }
-  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
   sb.auth.getSession().then(({data})=>{ if(data.session) onAuth(data.session); });
   sb.auth.onAuthStateChange((_e,session)=>{ if(session) onAuth(session); else showLogin(); });
 }
@@ -468,6 +468,7 @@ async function changePwd(){
 }
 function _hdr(doc,p,title){const W=doc.internal.pageSize.getWidth();doc.setFillColor(31,56,100);doc.rect(0,0,W,72,'F');doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(15);doc.text('Apex Engenharia — '+title,40,32);doc.setFont(undefined,'normal');doc.setFontSize(10);doc.text('Posição em '+(p.date||'')+'   ·   saldos de '+(p.saldos||''),40,52);doc.setTextColor(0);}
 function _ftr(doc){const H=doc.internal.pageSize.getHeight();doc.setFontSize(8);doc.setTextColor(120);doc.text('Documento Confidencial — Uso Exclusivo da Diretoria · gerado em '+new Date().toLocaleString('pt-BR'),40,H-20);doc.setTextColor(0);}
+function _output(doc,name){try{const blob=doc.output('blob');const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}catch(e){try{window.open(doc.output('bloburl'),'_blank');}catch(e2){alert('Não foi possível abrir o PDF: '+(e2.message||e2));}}}
 function _clean(s){return (''+s).replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{2300}-\u{23FF}\u{2700}-\u{27BF}]/gu,'').replace(/\s+/g,' ').trim();}
 function _money(v){return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pdfPosicao(){
@@ -489,7 +490,7 @@ function pdfPosicao(){
     const pj=p.t1+p.t3,pf=p.t2,cgF=p.cgl-p.cgu,chF=p.chl-p.chu;
     doc.autoTable({startY:90,head:[['Resumo (detalhe completo indisponível — reimporte o Excel)','']],body:[['Caixa líquido',_money(p.res)],['Liquidez imediata',_money(p.disp)],['  PJ',_money(pj)],['  PF',_money(pf)],['A liberar',_money(p.bloq)],['Com carência',_money(p.car)],['Empréstimos',_money(p.emp)],['Contrato Lét Parque',_money(p.ctr)],['Dívida total',_money(p.div)],['Contas garantidas livre',_money(cgF)],['Cheque livre',_money(chF)]],theme:'grid',headStyles:{fillColor:blue,textColor:255},styles:{fontSize:9,cellPadding:4},columnStyles:{0:{cellWidth:380},1:{halign:'right'}},margin:{left:40,right:40}});
   }
-  _ftr(doc);doc.save('Apex_Posicao_'+(p.date||'').replace(/\//g,'-')+'.pdf');
+  _ftr(doc);_output(doc,'Apex_Posicao_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
 function _perLabel(p){return {semana:'última semana',mes:'último mês','3m':'últimos 3 meses',ano:'último ano',tudo:'todo o histórico'}[p]||'';}
 function _histRange(anchor,per){
@@ -532,7 +533,7 @@ function pdfDashboard(){
       doc.setFontSize(8);doc.setTextColor(120);doc.text('Previsão semanal disponível ao reimportar o Excel desta data.',M,y+12);doc.setTextColor(0);
     }
   }catch(e){doc.setFontSize(10);doc.text('Não foi possível gerar os gráficos: '+(e.message||e),M,y+20);}
-  _ftr(doc);doc.save('Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');
+  _ftr(doc);_output(doc,'Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
