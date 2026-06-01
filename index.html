@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{--navy:#1F3864;--blue:#2E75B6;--green:#1D9E75;--red:#E24B4A;--amber:#BA7517;
 --bg:#F4F6F9;--card:#FFFFFF;--line:#E3E8F0;--txt:#1B2433;--mut:#6B7686;--mut2:#9AA4B2;}
@@ -385,31 +384,35 @@ async function importBackup(ev){
   ev.target.value='';
 }
 
+function fileToDataURL(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});}
 async function onFile(ev){
   const f=ev.target.files[0];if(!f)return;const dt=document.getElementById('dropTxt');
   try{
-    let txt='';
     if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){
       dt.textContent='Lendo PDF '+f.name+'…';
-      const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      let txt='';const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;
       for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
+      fillForm(extract(txt));
+      dt.innerHTML='✓ '+f.name+' lido — <b>confira os campos</b>';
     } else {
-      dt.textContent='Lendo imagem '+f.name+'… (OCR pode levar alguns segundos)';
-      const r=await Tesseract.recognize(f,'por');
-      txt=r.data.text;
+      dt.textContent='Lendo imagem '+f.name+' com IA…';
+      const dataUrl=await fileToDataURL(f);
+      const {data,error}=await sb.functions.invoke('extrair-posicao',{body:{image:dataUrl}});
+      if(error) throw error;
+      if(data && data.error) throw new Error(data.error);
+      fillForm(data);
+      dt.innerHTML='✓ imagem lida — <b>confira os campos com atenção</b>';
     }
-    fillForm(extract(txt));
-    dt.innerHTML='✓ '+f.name+' lido — <b>confira os campos com atenção</b>';
-  }catch(e){dt.textContent='Não consegui ler o arquivo ('+(e.message||'erro')+'). Preencha manualmente.';}
+  }catch(e){dt.textContent='Não consegui ler ('+(e.message||'erro')+'). Use PDF ou preencha manualmente.';}
 }
 function extract(t){
   t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
-  const find=re=>{const m=t.match(re);return m?parseBR(m[1]):'';};const fd=re=>{const m=t.match(re);return m?m[1]:'';};
+  const find=re=>{const m=t.match(re);return m?m[1]:'';};const fd=re=>{const m=t.match(re);return m?m[1]:'';};
   return{date:fd(/POSI[ÇC][ÃA]O EM:?\s*(\d{2}\/\d{2}\/\d{4})/i),saldos:fd(/SALDOS DE:?\s*(\d{2}\/\d{2}\/\d{4})/i),
     disp:find(new RegExp('Total Dispon[íi]vel \\(1\\+2\\+3\\)\\s*'+num,'i')),
     t1:find(new RegExp('Total 1[^\\d]*'+num,'i')),t2:find(new RegExp('Total 2[^\\d]*'+num,'i')),t3:find(new RegExp('Total 3[^\\d]*'+num,'i')),
     bloq:find(new RegExp('Cr[ée]ditos Bloqueados[^\\d]*'+num,'i')),car:find(new RegExp('Aplica[çc][õo]es com Car[êe]ncia[^\\d]*'+num,'i')),
-    emp:(function(){var m=t.match(new RegExp('Total Empr[ée]stimos\\D*'+num+'\\s+'+num,'i'));if(m)return parseBR(m[2]);var m2=t.match(new RegExp('Total Empr[ée]stimos[^\\d]*'+num,'i'));return m2?parseBR(m2[1]):'';})(),
+    emp:(function(){var m=t.match(new RegExp('Total Empr[ée]stimos\\D*'+num+'\\s+'+num,'i'));if(m)return m[2];var m2=t.match(new RegExp('Total Empr[ée]stimos[^\\d]*'+num,'i'));return m2?m2[1]:'';})(),
     ctr:find(new RegExp('Contrato PJ \\(F\\)[^\\d]*'+num,'i')),cgl:find(new RegExp('Total Contas Garantidas[^\\d]*'+num,'i')),cgu:'',
     chl:find(new RegExp('Total Limite de Cheque[^\\d]*'+num,'i')),chu:'',
     div:find(new RegExp('D[ÍI]VIDAS BANC[ÁA]RIAS \\(E\\+F\\+G\\+H\\)[^\\d]*'+num,'i')),res:find(new RegExp('RESULTADO \\(CR[ÉE]DITOS[^\\d]*'+num,'i'))};
