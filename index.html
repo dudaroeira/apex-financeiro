@@ -164,6 +164,12 @@ canvas{max-width:100%;}
   <div id="manageList"></div>
   <div class="msect">RELATÓRIOS (PDF) — posição selecionada</div>
   <button class="bigbtn" onclick="pdfPosicao()"><span class="ic">&#128196;</span><span><b>Posição de Saldo (completa)</b><small>Cópia fiel da aba, ajustada para A4</small></span></button>
+  <div style="display:flex;align-items:center;gap:8px;margin:2px 2px 10px;">
+    <span style="font-size:12px;color:var(--mut);white-space:nowrap;">Evolução:</span>
+    <select id="pdfPer" onchange="pdfPeriod=this.value" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;">
+      <option value="semana">Semana</option><option value="mes">Mês</option><option value="3m">3 meses</option><option value="ano">Ano</option><option value="tudo" selected>Tudo</option>
+    </select>
+  </div>
   <button class="bigbtn" onclick="pdfDashboard()"><span class="ic">&#128202;</span><span><b>Painel Executivo (Dashboard)</b><small>Composições, alertas e previsão</small></span></button>
   <div class="msect">CONTA</div>
   <button class="bigbtn" onclick="togglePwd()"><span class="ic">&#128273;</span><span><b>Trocar senha</b><small>Definir uma nova senha de acesso</small></span></button>
@@ -195,6 +201,7 @@ function toDate(d){const[a,b,c]=d.split("/");return new Date(+c,+b-1,+a);}
 
 let sb=null, DATA=[], CUR=-1, TAB="painel", chart=null, LIQVIEW="all", HISTPER="mes", isManager=false, userEmail="";
 let pendingDetail=null;
+let pdfPeriod='tudo';
 const configured = SUPABASE_URL.indexOf("http")===0 && SUPABASE_ANON_KEY.length>20;
 
 function boot(){
@@ -484,6 +491,13 @@ function pdfPosicao(){
   }
   _ftr(doc);doc.save('Apex_Posicao_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
+function _perLabel(p){return {semana:'última semana',mes:'último mês','3m':'últimos 3 meses',ano:'último ano',tudo:'todo o histórico'}[p]||'';}
+function _histRange(anchor,per){
+  const sorted=DATA.slice().sort((a,b)=>dkey(a.date)<dkey(b.date)?-1:1).filter(d=>toDate(d.date)<=toDate(anchor));
+  if(per==='tudo')return sorted;const cut=new Date(toDate(anchor));
+  if(per==='semana')cut.setDate(cut.getDate()-7);else if(per==='mes')cut.setMonth(cut.getMonth()-1);else if(per==='3m')cut.setMonth(cut.getMonth()-3);else if(per==='ano')cut.setFullYear(cut.getFullYear()-1);
+  return sorted.filter(d=>toDate(d.date)>=cut);
+}
 function _kmoney(v){return 'R$ '+((v||0)/1e6).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' MM';}
 function _weekly(p){const out={labels:[],values:[]};if(!p._dash)return out;const days=['segunda','terca','quarta','quinta','sexta'];for(const r of p._dash){const l=(''+(r[0]||'')).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();if(days.indexOf(l)>=0){out.labels.push(r[0]);out.values.push(parseBR(r[1]));}}return out;}
 function _chartImg(cfg,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;c.style.position='fixed';c.style.left='-10000px';c.style.top='0';document.body.appendChild(c);const ch=new Chart(c.getContext('2d'),Object.assign({},cfg,{options:Object.assign({animation:false,responsive:false,devicePixelRatio:1},cfg.options||{})}));const url=c.toDataURL('image/png');ch.destroy();document.body.removeChild(c);return url;}
@@ -507,8 +521,8 @@ function pdfDashboard(){
     doc.addImage(cred,'PNG',M,y,half,chartH);
     doc.addImage(divd,'PNG',M+half+16,y,half,chartH);
     y+=chartH+18;
-    const rows=DATA.slice().sort((a,b)=>dkey(a.date)<dkey(b.date)?-1:1);
-    const evo=_chartImg({type:'line',data:{labels:rows.map(d=>d.date.slice(0,5)),datasets:[{label:'Caixa líquido',data:rows.map(d=>(d.res||0)/1e6),borderColor:'#1D9E75',backgroundColor:'#1D9E75',tension:.3,pointRadius:2,borderWidth:2},{label:'Dívida líquida',data:rows.map(d=>(d.div||0)/1e6),borderColor:'#E24B4A',backgroundColor:'#E24B4A',tension:.3,pointRadius:2,borderWidth:2},{label:'Liquidez imediata',data:rows.map(d=>(d.disp||0)/1e6),borderColor:'#2E75B6',backgroundColor:'#2E75B6',tension:.3,pointRadius:2,borderWidth:2}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:9}}},title:{display:true,text:'Evolução (R$ milhões)',font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:8}}}}}},Math.round(CW*2),Math.round(150*2));
+    const rows=_histRange(p.date,pdfPeriod);
+    const evo=_chartImg({type:'line',data:{labels:rows.map(d=>d.date.slice(0,5)),datasets:[{label:'Caixa líquido',data:rows.map(d=>(d.res||0)/1e6),borderColor:'#1D9E75',backgroundColor:'#1D9E75',tension:.3,pointRadius:2,borderWidth:2},{label:'Dívida líquida',data:rows.map(d=>(d.div||0)/1e6),borderColor:'#E24B4A',backgroundColor:'#E24B4A',tension:.3,pointRadius:2,borderWidth:2},{label:'Liquidez imediata',data:rows.map(d=>(d.disp||0)/1e6),borderColor:'#2E75B6',backgroundColor:'#2E75B6',tension:.3,pointRadius:2,borderWidth:2}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:9}}},title:{display:true,text:'Evolução (R$ milhões) — '+_perLabel(pdfPeriod),font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:8}}}}}},Math.round(CW*2),Math.round(150*2));
     doc.addImage(evo,'PNG',M,y,CW,150);y+=150+18;
     const wk=_weekly(p);
     if(wk.labels.length){
