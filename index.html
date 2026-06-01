@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Apex Financeiro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--navy:#1F3864;--blue:#2E75B6;--green:#1D9E75;--red:#E24B4A;--amber:#BA7517;
+--bg:#F4F6F9;--card:#FFFFFF;--line:#E3E8F0;--txt:#1B2433;--mut:#6B7686;--mut2:#9AA4B2;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);}
+#app{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);display:flex;flex-direction:column;position:relative;}
+header{background:var(--navy);color:#fff;padding:14px 16px 12px;position:sticky;top:0;z-index:10;}
+.topbar{display:flex;justify-content:space-between;align-items:center;}
+.topbar .brand{font-size:12px;letter-spacing:.5px;opacity:.85;}
+.topbar .who{font-size:10px;opacity:.7;margin-top:2px;}
+.topbar .menu{background:rgba(255,255,255,.14);border:none;color:#fff;width:32px;height:32px;border-radius:9px;font-size:17px;cursor:pointer;}
+.navdate{display:flex;align-items:center;gap:8px;margin-top:11px;}
+.navdate .arrow{background:rgba(255,255,255,.14);border:none;color:#fff;width:34px;height:34px;border-radius:9px;font-size:15px;cursor:pointer;flex:none;}
+.navdate .arrow:disabled{opacity:.35;}
+.navdate select{flex:1;background:rgba(255,255,255,.14);color:#fff;border:none;border-radius:9px;padding:8px 10px;font-size:14px;font-weight:600;text-align:center;text-align-last:center;}
+.navdate select option{color:#000;}
+main{flex:1;padding:16px 16px 90px;}
+h1{font-size:18px;font-weight:600;margin-bottom:14px;}
+.kpi{background:var(--card);border-radius:14px;padding:16px;margin-bottom:10px;border:1px solid var(--line);}
+.kpi .lbl{font-size:13px;color:var(--mut);}.kpi .big{font-size:26px;font-weight:600;margin-top:3px;}.kpi .big.sm{font-size:20px;}
+.kpi .delta{font-size:12px;margin-top:4px;display:flex;align-items:center;gap:4px;}
+.up{color:var(--green);}.down{color:var(--red);}.flat{color:var(--mut);}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}.row2 .kpi{margin-bottom:0;}
+.sect{font-size:13px;color:var(--mut);margin:18px 0 8px;font-weight:600;}
+.card{background:var(--card);border-radius:14px;padding:14px 16px;border:1px solid var(--line);margin-bottom:10px;}
+.bar-lbl{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;}.bar-lbl b{font-weight:600;}
+.bar{height:11px;border-radius:6px;margin-bottom:13px;min-width:6px;}
+.toggle{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;}
+.toggle span{font-size:12px;padding:6px 13px;border-radius:16px;border:1px solid var(--line);color:var(--mut);cursor:pointer;background:var(--card);user-select:none;}
+.toggle span.on{background:#E6EEF8;color:var(--blue);border-color:#C3D6EE;font-weight:600;}
+.line{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line);}
+.line:last-child{border-bottom:none;}.line .v{color:var(--mut);}
+.debt{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:9px;background:var(--card);}
+.debt .t{display:flex;justify-content:space-between;font-size:14px;font-weight:600;}.debt .s{font-size:12px;color:var(--mut);margin-top:4px;}
+.free{color:var(--green);font-weight:600;}
+.legend{font-size:12px;line-height:2;margin-top:8px;}.legend i{font-style:normal;}
+.empty{text-align:center;color:var(--mut);font-size:13px;padding:30px 10px;}
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--card);border-top:1px solid var(--line);display:flex;height:64px;z-index:20;}
+nav button{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--mut2);font-size:11px;cursor:pointer;padding:0;}
+nav button.on{color:var(--blue);}nav button svg{width:22px;height:22px;}
+.fab{position:fixed;bottom:78px;left:50%;transform:translateX(calc(-50% + 150px));background:var(--blue);color:#fff;border:none;width:52px;height:52px;border-radius:50%;font-size:26px;box-shadow:0 4px 14px rgba(46,117,182,.4);z-index:21;cursor:pointer;}
+.modal{position:fixed;inset:0;background:rgba(20,28,42,.5);z-index:30;display:none;align-items:flex-end;justify-content:center;}
+.modal.on{display:flex;}
+.sheet{background:var(--card);width:100%;max-width:480px;border-radius:18px 18px 0 0;padding:20px 18px 28px;max-height:88vh;overflow:auto;}
+.sheet h2{font-size:17px;font-weight:600;margin-bottom:4px;}.sheet p.hint{font-size:12px;color:var(--mut);margin-bottom:16px;line-height:1.5;}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--mut);font-size:13px;margin-bottom:16px;cursor:pointer;}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;}
+.field{display:flex;flex-direction:column;}.field.full{grid-column:1/3;}
+.field label{font-size:11px;color:var(--mut);margin-bottom:3px;}
+.field input{border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:14px;width:100%;}
+.btns{display:flex;gap:10px;margin-top:18px;}
+.btns button{flex:1;padding:13px;border-radius:11px;font-size:14px;font-weight:600;border:none;cursor:pointer;}
+.btn-p{background:var(--blue);color:#fff;}.btn-s{background:#EDF0F5;color:var(--txt);}
+.note{font-size:11px;color:var(--mut2);text-align:center;margin-top:14px;line-height:1.5;}
+canvas{max-width:100%;}
+.mrow{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;}
+.mrow:last-child{border-bottom:none;}.mrow .act{display:flex;gap:8px;}
+.mrow .act button{border:none;background:#EDF0F5;color:var(--txt);width:34px;height:34px;border-radius:9px;font-size:15px;cursor:pointer;}
+.mrow .act button.del{background:#FBE9E9;color:var(--red);}
+.bigbtn{display:flex;align-items:center;gap:10px;width:100%;padding:14px;border:1px solid var(--line);background:var(--card);border-radius:12px;font-size:14px;cursor:pointer;margin-bottom:10px;text-align:left;color:var(--txt);}
+.bigbtn b{font-weight:600;}.bigbtn small{display:block;color:var(--mut);font-size:11px;margin-top:2px;}
+.bigbtn .ic{width:36px;height:36px;border-radius:9px;background:#E6EEF8;color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;}
+.msect{font-size:12px;color:var(--mut);font-weight:600;margin:18px 0 8px;}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:6px;}
+.badge.mgr{background:#E1F0E9;color:#0F6E56;}.badge.view{background:#E6EEF8;color:#185FA5;}
+/* login */
+#login{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;}
+#login .box{width:100%;max-width:360px;}
+#login .logo{text-align:center;margin-bottom:22px;}
+#login .logo .b1{color:var(--navy);font-size:22px;font-weight:700;}
+#login .logo .b2{color:var(--mut);font-size:13px;margin-top:2px;}
+#login label{font-size:12px;color:var(--mut);display:block;margin:12px 0 4px;}
+#login input{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:15px;}
+#login button{width:100%;background:var(--blue);color:#fff;border:none;border-radius:11px;padding:13px;font-size:15px;font-weight:600;margin-top:18px;cursor:pointer;}
+#login .err{color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:18px;}
+#login .cfg{color:var(--amber);font-size:12px;text-align:center;margin-top:14px;line-height:1.5;}
+.hidden{display:none!important;}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <div class="logo"><div class="b1">Apex Financeiro</div><div class="b2">Acompanhamento de caixa</div></div>
+    <label>E-mail</label><input id="li_email" type="email" autocomplete="username" placeholder="seu@email.com">
+    <label>Senha</label><input id="li_pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    <button onclick="doLogin()">Entrar</button>
+    <div class="err" id="li_err"></div>
+    <div class="cfg hidden" id="li_cfg"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="topbar">
+      <div><div class="brand">APEX ENGENHARIA · FINANCEIRO</div><div class="who" id="who"></div></div>
+      <button class="menu" onclick="openMenu()" aria-label="Menu">&#9776;</button>
+    </div>
+    <div class="navdate">
+      <button class="arrow" id="prev" onclick="step(-1)" aria-label="Anterior">&#9664;</button>
+      <select id="posSel" onchange="selectPos(this.value)"></select>
+      <button class="arrow" id="next" onclick="step(1)" aria-label="Próximo">&#9654;</button>
+    </div>
+  </header>
+  <main id="main"></main>
+  <button class="fab hidden" id="fab" onclick="openModal()" aria-label="Carregar nova posição">+</button>
+  <nav id="nav">
+    <button data-t="painel" class="on" onclick="go('painel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Painel</button>
+    <button data-t="liquidez" onclick="go('liquidez')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M5 9c0-4 3.5-7 7-7s7 3 7 7c0 5-7 13-7 13S5 14 5 9z"/></svg>Liquidez</button>
+    <button data-t="divida" onclick="go('divida')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h12"/></svg>Dívida</button>
+    <button data-t="historico" onclick="go('historico')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Histórico</button>
+  </nav>
+</div>
+
+<div class="modal" id="modal"><div class="sheet">
+  <h2 id="modalTitle">Carregar posição</h2>
+  <p class="hint">Selecione o PDF de "Composição Saldo Diário". O app tenta extrair os campos — confira antes de salvar. Se a data já existir, ela é substituída.</p>
+  <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher o PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
+  <input type="file" id="pdf" accept="application/pdf" style="display:none" onchange="onPdf(event)">
+  <div class="fields">
+    <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
+    <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
+    <div class="field full"><label>(A) Total Disponível</label><input id="f_disp" inputmode="decimal"></div>
+    <div class="field"><label>Total 1 — CC PJ</label><input id="f_t1" inputmode="decimal"></div>
+    <div class="field"><label>Total 2 — CC PF + CDB</label><input id="f_t2" inputmode="decimal"></div>
+    <div class="field"><label>Total 3 — Aplicações DI</label><input id="f_t3" inputmode="decimal"></div>
+    <div class="field"><label>(B) Créditos bloqueados</label><input id="f_bloq" inputmode="decimal"></div>
+    <div class="field"><label>(D) Aplic. com carência</label><input id="f_car" inputmode="decimal"></div>
+    <div class="field"><label>Empréstimos (E)</label><input id="f_emp" inputmode="decimal"></div>
+    <div class="field"><label>Contrato PJ (F)</label><input id="f_ctr" inputmode="decimal"></div>
+    <div class="field"><label>Contas garant. — limite</label><input id="f_cgl" inputmode="decimal"></div>
+    <div class="field"><label>Contas garant. — usado</label><input id="f_cgu" inputmode="decimal"></div>
+    <div class="field"><label>Cheque esp. — limite</label><input id="f_chl" inputmode="decimal"></div>
+    <div class="field"><label>Cheque esp. — usado</label><input id="f_chu" inputmode="decimal"></div>
+    <div class="field"><label>Total dívidas bancárias</label><input id="f_div" inputmode="decimal"></div>
+    <div class="field"><label>Resultado (caixa líquido)</label><input id="f_res" inputmode="decimal"></div>
+  </div>
+  <div class="btns"><button class="btn-s" onclick="closeModal()">Cancelar</button><button class="btn-p" onclick="savePos()">Salvar na nuvem</button></div>
+</div></div>
+
+<div class="modal" id="menu"><div class="sheet">
+  <h2>Dados e conta</h2>
+  <p class="hint">Backup, busca e gestão das posições. As alterações são compartilhadas com todos.</p>
+  <div class="msect">BUSCAR POR DATA</div>
+  <input type="date" id="seek" onchange="seekDate(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:14px;">
+  <div class="note" id="seekNote" style="text-align:left;margin-top:4px"></div>
+  <div class="msect">BACKUP</div>
+  <button class="bigbtn" onclick="exportBackup()"><span class="ic">&#8615;</span><span><b>Exportar backup</b><small>Baixa um .json com todas as posições</small></span></button>
+  <button class="bigbtn mgrOnly" onclick="document.getElementById('imp').click()"><span class="ic">&#8613;</span><span><b>Importar backup</b><small>Envia posições de um .json para a nuvem</small></span></button>
+  <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
+  <div class="msect" id="manageHdr">POSIÇÕES SALVAS</div>
+  <div id="manageList"></div>
+  <div class="msect">CONTA</div>
+  <button class="bigbtn" onclick="doLogout()"><span class="ic">&#9099;</span><span><b>Sair</b><small id="logoutWho"></small></span></button>
+  <div class="btns"><button class="btn-s" onclick="closeMenu()">Fechar</button></div>
+</div></div>
+
+<script>
+/* ====================== CONFIGURAÇÃO ======================
+   Preencha os 3 valores abaixo seguindo o guia de configuração.
+   - SUPABASE_URL e SUPABASE_ANON_KEY: do painel do Supabase (Settings > API)
+   - MANAGER_EMAIL: e-mail do gerente financeiro (único que pode alimentar) */
+const SUPABASE_URL = "https://aqaxqjopjomzjcbabicm.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_A5eL1IKoRqi1-GKaYmbaIQ_v36M2apl";
+const MANAGER_EMAIL = "financeiro@apex.com.br";
+/* ========================================================== */
+
+const BRL=v=>"R$ "+(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const MM=v=>"R$ "+((v||0)/1e6).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+" MM";
+function parseBR(s){if(typeof s==="number")return s;if(!s)return 0;return parseFloat(String(s).replace(/\./g,"").replace(",","."))||0;}
+function dkey(d){const[a,b,c]=d.split("/");return c+b.padStart(2,"0")+a.padStart(2,"0");}
+function toDate(d){const[a,b,c]=d.split("/");return new Date(+c,+b-1,+a);}
+
+let sb=null, DATA=[], CUR=-1, TAB="painel", chart=null, LIQVIEW="all", HISTPER="mes", isManager=false, userEmail="";
+const configured = SUPABASE_URL.indexOf("http")===0 && SUPABASE_ANON_KEY.length>20;
+
+function boot(){
+  if(!configured){
+    const c=document.getElementById('li_cfg');c.classList.remove('hidden');
+    c.innerHTML='⚠ App ainda não configurado. Abra o arquivo e preencha SUPABASE_URL, SUPABASE_ANON_KEY e MANAGER_EMAIL (veja o guia).';
+    return;
+  }
+  sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  sb.auth.getSession().then(({data})=>{ if(data.session) onAuth(data.session); });
+  sb.auth.onAuthStateChange((_e,session)=>{ if(session) onAuth(session); else showLogin(); });
+}
+function showLogin(){document.getElementById('login').classList.remove('hidden');document.getElementById('app').classList.add('hidden');}
+async function doLogin(){
+  const email=document.getElementById('li_email').value.trim();
+  const pass=document.getElementById('li_pass').value;
+  const err=document.getElementById('li_err');err.textContent='';
+  if(!email||!pass){err.textContent='Preencha e-mail e senha.';return;}
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){err.textContent='E-mail ou senha incorretos.';}
+}
+async function doLogout(){await sb.auth.signOut();location.reload();}
+function onAuth(session){
+  userEmail=session.user.email||"";
+  isManager = userEmail.toLowerCase()===MANAGER_EMAIL.toLowerCase();
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('who').innerHTML=userEmail+(isManager?'<span class="badge mgr">Gerente</span>':'<span class="badge view">Sócio</span>');
+  document.getElementById('logoutWho').textContent=userEmail;
+  document.getElementById('fab').classList.toggle('hidden',!isManager);
+  document.querySelectorAll('.mgrOnly').forEach(e=>e.classList.toggle('hidden',!isManager));
+  loadCloud();
+  subscribe();
+}
+function subscribe(){
+  sb.channel('positions-rt').on('postgres_changes',{event:'*',schema:'public',table:'positions'},()=>loadCloud()).subscribe();
+}
+async function loadCloud(){
+  const {data,error}=await sb.from('positions').select('posdate,payload');
+  if(error){console.error(error);return;}
+  DATA=(data||[]).map(r=>r.payload);
+  sortData();
+  if(CUR<0||CUR>=DATA.length)CUR=DATA.length-1;
+  cache();render();
+}
+function cache(){try{localStorage.setItem("apexfin_cloud_cache",JSON.stringify(DATA));}catch(e){}}
+function sortData(){DATA.sort((a,b)=>dkey(a.date)<dkey(b.date)?-1:1);}
+
+function prevOf(i){return i>0?DATA[i-1]:null;}
+function deltaHtml(cur,prev,fmt){
+  if(prev==null)return '<span class="flat">— sem base anterior</span>';
+  const d=cur-prev;if(Math.abs(d)<0.5)return '<span class="flat">&#9644; estável</span>';
+  const up=d>0,pct=prev?(d/Math.abs(prev)*100):0;
+  return `<span class="${up?'up':'down'}">${up?'&#9650;':'&#9660;'} ${fmt(Math.abs(d))} (${pct.toFixed(1)}%)</span>`;
+}
+function selectPos(i){CUR=+i;render();}
+function step(d){const n=CUR+d;if(n<0||n>=DATA.length)return;CUR=n;render();}
+function go(t){TAB=t;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));render();}
+function setLiq(v){LIQVIEW=v;render();}
+function setPer(v){HISTPER=v;render();}
+
+function render(){
+  sortData();
+  if(!DATA.length){renderEmpty();return;}
+  if(CUR>=DATA.length)CUR=DATA.length-1;if(CUR<0)CUR=0;
+  const p=DATA[CUR],pr=prevOf(CUR);
+  document.getElementById('posSel').innerHTML=DATA.map((d,i)=>i).reverse().map(i=>`<option value="${i}" ${i===CUR?'selected':''}>${DATA[i].date}</option>`).join('');
+  document.getElementById('prev').disabled=CUR<=0;document.getElementById('next').disabled=CUR>=DATA.length-1;
+  const m=document.getElementById('main');
+  if(TAB==='painel')m.innerHTML=painel(p,pr);
+  else if(TAB==='liquidez')m.innerHTML=liquidez(p);
+  else if(TAB==='divida')m.innerHTML=divida(p);
+  else m.innerHTML=historico();
+  if(TAB==='historico')drawChart();
+}
+function renderEmpty(){
+  document.getElementById('posSel').innerHTML='<option>—</option>';
+  document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
+  document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.':'<br>Aguarde o gerente alimentar.')+'</div>';
+}
+
+function painel(p,pr){return `<h1>Painel executivo</h1>
+  <div class="kpi"><div class="lbl">Caixa líquido</div><div class="big">${BRL(p.res)}</div><div class="delta">${deltaHtml(p.res,pr?pr.res:null,BRL)}</div></div>
+  <div class="row2">
+    <div class="kpi"><div class="lbl">Liquidez imediata</div><div class="big sm">${MM(p.disp)}</div><div class="delta">${deltaHtml(p.disp,pr?pr.disp:null,v=>MM(v))}</div></div>
+    <div class="kpi"><div class="lbl">Dívida líquida</div><div class="big sm">${MM(p.div)}</div><div class="delta">${deltaHtml(p.div,pr?pr.div:null,v=>MM(v))}</div></div>
+  </div>
+  <div class="sect">A liberar (médio prazo)</div>
+  <div class="card"><div class="line"><span>Créditos bloqueados (empreend.)</span><span class="v">${BRL(p.bloq)}</span></div>
+    <div class="line"><span>Aplicações com carência</span><span class="v">${BRL(p.car)}</span></div></div>
+  <div class="note" style="margin-top:6px">Posição em ${p.date} · saldos de ${p.saldos}</div>`;}
+
+function liquidez(p){
+  const pj=p.t1+p.t3, pf=p.t2;let imed,aLib,carc,showPJ=true,showPF=true;
+  if(LIQVIEW==='pj'){imed=pj;aLib=p.bloq;carc=0;showPF=false;}
+  else if(LIQVIEW==='pf'){imed=pf;aLib=0;carc=p.car;showPJ=false;}
+  else{imed=p.disp;aLib=p.bloq;carc=p.car;}
+  const tot=(imed+aLib+carc)||1;const w=v=>Math.max(4,Math.round(v/tot*100));
+  let bd='';
+  if(showPJ)bd+=`<div class="line"><span><b>PJ — caixa da Apex</b></span><span class="v">${BRL(pj)}</span></div>
+    <div class="line"><span style="padding-left:10px;color:var(--mut)">Contas correntes PJ</span><span class="v">${BRL(p.t1)}</span></div>
+    <div class="line"><span style="padding-left:10px;color:var(--mut)">Aplicações DI corporativas</span><span class="v">${BRL(p.t3)}</span></div>`;
+  if(showPF)bd+=`<div class="line"><span><b>PF — patrimônio dos sócios</b></span><span class="v">${BRL(pf)}</span></div>
+    <div class="line"><span style="padding-left:10px;color:var(--mut)">CC conjuntas + CDBs sócios</span><span class="v">${BRL(p.t2)}</span></div>`;
+  return `<h1>Liquidez detalhada</h1>
+  <div class="toggle"><span class="${LIQVIEW==='all'?'on':''}" onclick="setLiq('all')">PJ + PF</span><span class="${LIQVIEW==='pj'?'on':''}" onclick="setLiq('pj')">Só PJ</span><span class="${LIQVIEW==='pf'?'on':''}" onclick="setLiq('pf')">Só PF</span></div>
+  <div class="sect">Camadas por horizonte${LIQVIEW==='pj'?' · empresa':LIQVIEW==='pf'?' · sócios':''}</div>
+  <div class="card">
+    <div class="bar-lbl"><span>Imediata (D0)</span><b>${MM(imed)}</b></div><div class="bar" style="width:${w(imed)}%;background:#5DCAA5"></div>
+    <div class="bar-lbl"><span>A liberar (empreend.)</span><b>${MM(aLib)}</b></div><div class="bar" style="width:${w(aLib)}%;background:#EF9F27"></div>
+    <div class="bar-lbl"><span>Com carência</span><b>${MM(carc)}</b></div><div class="bar" style="width:${w(carc)}%;background:#F0997B"></div></div>
+  <div class="sect">Imediata — empresa × sócios</div><div class="card">${bd}</div>
+  <div class="note">A carência (LCIs) é patrimônio dos sócios; os créditos bloqueados (empreendimentos) são da empresa.</div>`;}
+
+function divida(p){
+  const cgFree=p.cgl-p.cgu, chFree=p.chl-p.chu;const pctFree=(f,l)=>l?Math.max(3,Math.round(f/l*100)):0;
+  return `<h1>Dívida e linhas</h1>
+  <div class="sect">Dívida bancária — ${MM(p.div)}</div>
+  <div class="debt"><div class="t"><span>Empréstimos</span><span>${BRL(p.emp)}</span></div><div class="s">BRB venc. 30/11/2026 · Itaú BNDES venc. 19/10/2028</div></div>
+  <div class="debt"><div class="t"><span>Contrato Lét Parque</span><span>${BRL(p.ctr)}</span></div><div class="s">099 Apex PJ + juros</div></div>
+  <div class="sect">Fôlego contingente (limite disponível)</div>
+  <div class="card"><div class="bar-lbl"><span>Contas garantidas</span><span class="free">${MM(cgFree)} livre</span></div><div class="bar" style="width:${pctFree(cgFree,p.cgl)}%;background:#97C459"></div>
+    <div class="bar-lbl"><span>Cheque especial</span><span class="free">${MM(chFree)} livre</span></div><div class="bar" style="width:${pctFree(chFree,p.chl)}%;background:#97C459"></div>
+    <div class="line" style="margin-top:6px"><span>Total disponível sem captar</span><b>${MM(cgFree+chFree)}</b></div></div>`;}
+
+function filteredHist(){
+  sortData();if(!DATA.length)return [];
+  if(HISTPER==='tudo')return DATA.slice();
+  const last=toDate(DATA[DATA.length-1].date);const cut=new Date(last);
+  if(HISTPER==='semana')cut.setDate(cut.getDate()-7);
+  else if(HISTPER==='mes')cut.setMonth(cut.getMonth()-1);
+  else if(HISTPER==='3m')cut.setMonth(cut.getMonth()-3);
+  else if(HISTPER==='ano')cut.setFullYear(cut.getFullYear()-1);
+  return DATA.filter(d=>toDate(d.date)>=cut);
+}
+function historico(){
+  const opt=(v,l)=>`<span class="${HISTPER===v?'on':''}" onclick="setPer('${v}')">${l}</span>`;
+  return `<h1>Histórico / evolução</h1>
+  <div class="toggle">${opt('semana','Semana')}${opt('mes','Mês')}${opt('3m','3 meses')}${opt('ano','Ano')}${opt('tudo','Tudo')}</div>
+  <div class="card"><canvas id="cv" height="220"></canvas><div class="legend">
+    <div><i style="color:#1D9E75">●</i> Caixa líquido</div><div><i style="color:#2E75B6">●</i> Liquidez imediata</div><div><i style="color:#E24B4A">●</i> Dívida líquida</div></div></div>
+  <div class="note">${filteredHist().length} posição(ões) no período.</div>`;}
+function drawChart(){
+  const ctx=document.getElementById('cv');if(!ctx)return;if(chart)chart.destroy();
+  const rows=filteredHist();const labels=rows.map(d=>d.date.slice(0,5));
+  const ds=(k,c)=>({data:rows.map(d=>d[k]/1e6),borderColor:c,backgroundColor:c,tension:.3,pointRadius:3,borderWidth:2});
+  chart=new Chart(ctx,{type:'line',data:{labels,datasets:[{...ds('res','#1D9E75')},{...ds('disp','#2E75B6')},{...ds('div','#E24B4A')}]},
+    options:{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+' MM',font:{size:11}}},x:{ticks:{font:{size:11}}}}}});
+}
+
+function openModal(){if(!isManager)return;fillForm({});document.getElementById('modalTitle').textContent='Carregar posição';document.getElementById('modal').classList.add('on');}
+function editPos(i){if(!isManager)return;closeMenu();fillForm(DATA[i]);document.getElementById('modalTitle').textContent='Corrigir posição';document.getElementById('dropTxt').innerHTML='Substituir por novo PDF<br><span style="font-size:11px">(ou edite os campos)</span>';document.getElementById('modal').classList.add('on');}
+function closeModal(){document.getElementById('modal').classList.remove('on');document.getElementById('dropTxt').innerHTML='Toque para escolher o PDF<br><span style="font-size:11px">(ou preencha manualmente)</span>';}
+function setF(id,v){document.getElementById(id).value=(v===0||v)?v:'';}
+function fillForm(o){o=o||{};setF('f_date',o.date||'');setF('f_saldos',o.saldos||'');setF('f_disp',o.disp);setF('f_t1',o.t1);setF('f_t2',o.t2);setF('f_t3',o.t3);setF('f_bloq',o.bloq);setF('f_car',o.car);setF('f_emp',o.emp);setF('f_ctr',o.ctr);setF('f_cgl',o.cgl);setF('f_cgu',o.cgu);setF('f_chl',o.chl);setF('f_chu',o.chu);setF('f_div',o.div);setF('f_res',o.res);}
+async function savePos(){
+  const g=id=>String(document.getElementById(id).value).trim();
+  const o={date:g('f_date'),saldos:g('f_saldos'),disp:parseBR(g('f_disp')),t1:parseBR(g('f_t1')),t2:parseBR(g('f_t2')),t3:parseBR(g('f_t3')),bloq:parseBR(g('f_bloq')),car:parseBR(g('f_car')),emp:parseBR(g('f_emp')),ctr:parseBR(g('f_ctr')),cgl:parseBR(g('f_cgl')),cgu:parseBR(g('f_cgu')),chl:parseBR(g('f_chl')),chu:parseBR(g('f_chu')),div:parseBR(g('f_div')),res:parseBR(g('f_res'))};
+  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(o.date)){alert('Informe a data no formato DD/MM/AAAA.');return;}
+  const {error}=await sb.from('positions').upsert({posdate:o.date,payload:o},{onConflict:'posdate'});
+  if(error){alert('Erro ao salvar: '+error.message);return;}
+  closeModal();await loadCloud();CUR=DATA.findIndex(d=>d.date===o.date);render();
+}
+
+function openMenu(){renderManage();document.getElementById('seekNote').textContent='';document.getElementById('menu').classList.add('on');}
+function closeMenu(){document.getElementById('menu').classList.remove('on');}
+function seekDate(v){
+  if(!v||!DATA.length)return;const target=+v.replace(/-/g,'');let best=0,bd=Infinity,exact=false;
+  DATA.forEach((d,i)=>{const k=+dkey(d.date);const diff=Math.abs(k-target);if(diff<bd){bd=diff;best=i;}if(diff===0)exact=true;});
+  CUR=best;document.getElementById('seekNote').textContent=exact?('Posição de '+DATA[best].date+'.'):('Sem posição nesse dia — abrindo a mais próxima: '+DATA[best].date+'.');render();
+}
+function renderManage(){
+  const list=document.getElementById('manageList');sortData();
+  document.getElementById('manageHdr').textContent='POSIÇÕES SALVAS ('+DATA.length+')';
+  if(!DATA.length){list.innerHTML='<div class="note" style="text-align:left">Nenhuma posição.</div>';return;}
+  list.innerHTML=DATA.map((d,i)=>i).reverse().map(i=>{
+    const acts=isManager?`<span class="act"><button onclick="editPos(${i})" aria-label="Corrigir">&#9998;</button><button class="del" onclick="removePos(${i})" aria-label="Remover">&#128465;</button></span>`:'';
+    return `<div class="mrow"><span>${DATA[i].date} &nbsp;<span style="color:var(--mut);font-size:12px">${BRL(DATA[i].res)}</span></span>${acts}</div>`;}).join('');
+}
+async function removePos(i){
+  if(!isManager)return;const d=DATA[i].date;if(!confirm('Remover a posição de '+d+'?'))return;
+  const {error}=await sb.from('positions').delete().eq('posdate',d);
+  if(error){alert('Erro ao remover: '+error.message);return;}
+  await loadCloud();renderManage();
+}
+function exportBackup(){
+  const blob=new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');const t=new Date();const st=t.getFullYear()+String(t.getMonth()+1).padStart(2,'0')+String(t.getDate()).padStart(2,'0');
+  a.href=url;a.download='apex_backup_'+st+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
+async function importBackup(ev){
+  if(!isManager)return;const f=ev.target.files[0];if(!f)return;
+  try{
+    const arr=JSON.parse(await f.text());if(!Array.isArray(arr)||!arr.length||!arr[0].date)throw 0;
+    if(!confirm('Enviar '+arr.length+' posição(ões) para a nuvem? Datas iguais serão substituídas.')){ev.target.value='';return;}
+    const rows=arr.map(o=>({posdate:o.date,payload:o}));
+    const {error}=await sb.from('positions').upsert(rows,{onConflict:'posdate'});
+    if(error)throw error;
+    await loadCloud();renderManage();alert(arr.length+' posição(ões) importada(s).');
+  }catch(e){alert('Falha na importação: '+(e.message||'arquivo inválido.'));}
+  ev.target.value='';
+}
+
+async function onPdf(ev){
+  const f=ev.target.files[0];if(!f)return;document.getElementById('dropTxt').textContent='Lendo '+f.name+'…';
+  try{
+    const buf=await f.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;let txt='';
+    for(let n=1;n<=pdf.numPages;n++){const pg=await pdf.getPage(n);const c=await pg.getTextContent();txt+=' '+c.items.map(i=>i.str).join(' ');}
+    fillForm(extract(txt));document.getElementById('dropTxt').innerHTML='✓ '+f.name+' lido — <b>confira os campos</b>';
+  }catch(e){document.getElementById('dropTxt').textContent='Não consegui ler o PDF. Preencha manualmente.';}
+}
+function extract(t){
+  t=t.replace(/\s+/g,' ');const num='([\\d.]+,\\d{2})';
+  const find=re=>{const m=t.match(re);return m?parseBR(m[1]):'';};const fd=re=>{const m=t.match(re);return m?m[1]:'';};
+  return{date:fd(/POSI[ÇC][ÃA]O EM:?\s*(\d{2}\/\d{2}\/\d{4})/i),saldos:fd(/SALDOS DE:?\s*(\d{2}\/\d{2}\/\d{4})/i),
+    disp:find(new RegExp('Total Dispon[íi]vel \\(1\\+2\\+3\\)\\s*'+num,'i')),
+    t1:find(new RegExp('Total 1[^\\d]*'+num,'i')),t2:find(new RegExp('Total 2[^\\d]*'+num,'i')),t3:find(new RegExp('Total 3[^\\d]*'+num,'i')),
+    bloq:find(new RegExp('Cr[ée]ditos Bloqueados[^\\d]*'+num,'i')),car:find(new RegExp('Aplica[çc][õo]es com Car[êe]ncia[^\\d]*'+num,'i')),
+    emp:(function(){var m=t.match(new RegExp('Total Empr[ée]stimos\\D*'+num+'\\s+'+num,'i'));if(m)return parseBR(m[2]);var m2=t.match(new RegExp('Total Empr[ée]stimos[^\\d]*'+num,'i'));return m2?parseBR(m2[1]):'';})(),
+    ctr:find(new RegExp('Contrato PJ \\(F\\)[^\\d]*'+num,'i')),cgl:find(new RegExp('Total Contas Garantidas[^\\d]*'+num,'i')),cgu:'',
+    chl:find(new RegExp('Total Limite de Cheque[^\\d]*'+num,'i')),chu:'',
+    div:find(new RegExp('D[ÍI]VIDAS BANC[ÁA]RIAS \\(E\\+F\\+G\\+H\\)[^\\d]*'+num,'i')),res:find(new RegExp('RESULTADO \\(CR[ÉE]DITOS[^\\d]*'+num,'i'))};
+}
+boot();
+</script>
+</body>
+</html>
