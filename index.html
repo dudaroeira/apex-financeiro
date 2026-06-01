@@ -484,17 +484,40 @@ function pdfPosicao(){
   }
   _ftr(doc);doc.save('Apex_Posicao_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
+function _kmoney(v){return 'R$ '+((v||0)/1e6).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' MM';}
+function _weekly(p){const out={labels:[],values:[]};if(!p._dash)return out;const days=['segunda','terca','quarta','quinta','sexta'];for(const r of p._dash){const l=(''+(r[0]||'')).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();if(days.indexOf(l)>=0){out.labels.push(r[0]);out.values.push(parseBR(r[1]));}}return out;}
+function _chartImg(cfg,w,h){const c=document.createElement('canvas');c.width=w;c.height=h;c.style.position='fixed';c.style.left='-10000px';c.style.top='0';document.body.appendChild(c);const ch=new Chart(c.getContext('2d'),Object.assign({},cfg,{options:Object.assign({animation:false,responsive:false,devicePixelRatio:1},cfg.options||{})}));const url=c.toDataURL('image/png');ch.destroy();document.body.removeChild(c);return url;}
+function _kpi(doc,x,y,w,h,label,value,rgb){doc.setFillColor(rgb[0],rgb[1],rgb[2]);doc.roundedRect(x,y,w,h,6,6,'F');doc.setTextColor(255);doc.setFont(undefined,'normal');doc.setFontSize(8);doc.text(label,x+10,y+18);doc.setFont(undefined,'bold');doc.setFontSize(12);doc.text(value,x+10,y+40);doc.setTextColor(0);doc.setFont(undefined,'normal');}
 function pdfDashboard(){
   if(!DATA.length){alert('Sem posição para gerar.');return;}
   const p=DATA[CUR];const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
-  _hdr(doc,p,'Painel Executivo (Dashboard)');
-  if(!p._dash||!p._dash.length){
-    doc.setFontSize(11);doc.text('Dashboard indisponível para esta posição.',40,110);
-    doc.text('Reimporte o Excel desta data para gerar este relatório.',40,128);
-    _ftr(doc);doc.save('Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');return;
-  }
-  doc.autoTable({startY:90,body:p._dash.map(r=>{const a=r.map(_clean);while(a.length<2)a.push('');return a;}),theme:'grid',styles:{fontSize:9,cellPadding:4},columnStyles:{0:{cellWidth:360},1:{halign:'right'}},margin:{left:40,right:40},
-    didParseCell:d=>{if(d.section==='body'){const raw=d.row.raw;const isHead=(!raw[1])||/PAINEL|COMPOSI|ALERTAS|PREVIS|EMPR|LINHAS|GRAFICOS|GRÁFICOS|CONFIDENC|POSI/i.test(_clean(raw[0]).toUpperCase());if(isHead){d.cell.styles.fontStyle='bold';d.cell.styles.fillColor=[31,56,100];d.cell.styles.textColor=[255,255,255];}}}});
+  _hdr(doc,p,'Painel Executivo');
+  const M=40,W=doc.internal.pageSize.getWidth(),CW=W-2*M;
+  const resLiq=(p.disp||0)-(p.div||0);
+  const cw=(CW-3*10)/4,cy=86,chh=56;
+  _kpi(doc,M,cy,cw,chh,'Caixa líquido',_kmoney(p.res),[31,56,100]);
+  _kpi(doc,M+(cw+10),cy,cw,chh,'Liquidez imediata',_kmoney(p.disp),[46,117,182]);
+  _kpi(doc,M+2*(cw+10),cy,cw,chh,'Dívida líquida',_kmoney(p.div),[164,45,45]);
+  _kpi(doc,M+3*(cw+10),cy,cw,chh,'Result. líquido',_kmoney(resLiq),[15,110,86]);
+  let y=cy+chh+20;
+  const half=(CW-16)/2,chartH=152;
+  try{
+    const cred=_chartImg({type:'doughnut',data:{labels:['Disponível','Bloqueados','Carência'],datasets:[{data:[p.disp||0,p.bloq||0,p.car||0],backgroundColor:['#2E75B6','#EF9F27','#F0997B']}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:9}}},title:{display:true,text:'Composição dos Créditos',font:{size:11}}}}},Math.round(half*2),Math.round(chartH*2));
+    const divd=_chartImg({type:'bar',data:{labels:['Empréstimos','Contrato PJ'],datasets:[{data:[p.emp||0,p.ctr||0],backgroundColor:['#A42D2D','#E24B4A']}]},options:{plugins:{legend:{display:false},title:{display:true,text:'Composição das Dívidas',font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:9}}}}}},Math.round(half*2),Math.round(chartH*2));
+    doc.addImage(cred,'PNG',M,y,half,chartH);
+    doc.addImage(divd,'PNG',M+half+16,y,half,chartH);
+    y+=chartH+18;
+    const rows=DATA.slice().sort((a,b)=>dkey(a.date)<dkey(b.date)?-1:1);
+    const evo=_chartImg({type:'line',data:{labels:rows.map(d=>d.date.slice(0,5)),datasets:[{label:'Caixa líquido',data:rows.map(d=>(d.res||0)/1e6),borderColor:'#1D9E75',backgroundColor:'#1D9E75',tension:.3,pointRadius:2,borderWidth:2},{label:'Dívida líquida',data:rows.map(d=>(d.div||0)/1e6),borderColor:'#E24B4A',backgroundColor:'#E24B4A',tension:.3,pointRadius:2,borderWidth:2},{label:'Liquidez imediata',data:rows.map(d=>(d.disp||0)/1e6),borderColor:'#2E75B6',backgroundColor:'#2E75B6',tension:.3,pointRadius:2,borderWidth:2}]},options:{plugins:{legend:{position:'bottom',labels:{font:{size:9}}},title:{display:true,text:'Evolução (R$ milhões)',font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:8}}}}}},Math.round(CW*2),Math.round(150*2));
+    doc.addImage(evo,'PNG',M,y,CW,150);y+=150+18;
+    const wk=_weekly(p);
+    if(wk.labels.length){
+      const wku=_chartImg({type:'bar',data:{labels:wk.labels,datasets:[{data:wk.values,backgroundColor:'#534AB7'}]},options:{plugins:{legend:{display:false},title:{display:true,text:'Previsão de Gastos da Semana',font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:9}}}}}},Math.round(CW*2),Math.round(130*2));
+      doc.addImage(wku,'PNG',M,y,CW,130);
+    } else {
+      doc.setFontSize(8);doc.setTextColor(120);doc.text('Previsão semanal disponível ao reimportar o Excel desta data.',M,y+12);doc.setTextColor(0);
+    }
+  }catch(e){doc.setFontSize(10);doc.text('Não foi possível gerar os gráficos: '+(e.message||e),M,y+20);}
   _ftr(doc);doc.save('Apex_Dashboard_'+(p.date||'').replace(/\//g,'-')+'.pdf');
 }
 function extract(t){
