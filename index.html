@@ -460,9 +460,8 @@ function extractXlsx(buf){
   });
   const NUM={t1:['total 1',1],t2:['total 2',1],t3:['total 3',1],disp:['total disponivel',1],bloq:['total 4',1],car:['total 6',1],emp:['total emprestimos',5],ctr:['total posicao de divida contrato pj',5],cgl:['total contas garantidas',4],cgu:['total contas garantidas',5],chl:['total limite de cheque',4],chu:['total limite de cheque',5],div:['total geral dividas bancarias',5]};
   for(const k in NUM){const lbl=NUM[k][0],col=NUM[k][1];const r=findRow(lbl);const row=r>=0?grid[r]:null;o[k]=(row&&row[col]!=null)?brNum(row[col]):'';}
-  var _dp=(o.date||'').split('/');var _dn=_dp.length===3?(+_dp[2]*10000+(+_dp[1])*100+(+_dp[0])):0;
-  var _rNew=_dn>=20260619;var _rR=findRow(_rNew?'resultado':'resultado (creditos');var _rC=_rNew?8:3;
-  o.res=(_rR>=0&&grid[_rR]&&grid[_rR][_rC]!=null)?brNum(grid[_rR][_rC]):'';
+  var _tgcR=findRow('total geral creditos');var _tgc=(_tgcR>=0&&grid[_tgcR]&&grid[_tgcR][1]!=null)?grid[_tgcR][1]:null;
+  o.res=(_tgc!=null)?brNum(parseBR(_tgc)-parseBR(o.div)):'';
   o._pos={cred:colGroup(grid,[0,1]),div:colGroup(grid,[3,4,5]),res:colGroup(grid,[7,8])};
   const dg=gridOf(wb,n=>normTxt(n)==='dashboard');
   o._dash=dg?colGroup(dg,[1,2]):[];
