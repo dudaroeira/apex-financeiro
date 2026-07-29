@@ -152,6 +152,7 @@ canvas{max-width:100%;}
     <button data-t="liquidez" onclick="go('liquidez')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M5 9c0-4 3.5-7 7-7s7 3 7 7c0 5-7 13-7 13S5 14 5 9z"/></svg>Liquidez</button>
     <button data-t="divida" onclick="go('divida')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h12"/></svg>Dívida</button>
     <button data-t="historico" onclick="go('historico')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Histórico</button>
+    <button data-t="grupo" onclick="go('grupo')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h2m2 0h2M9 13h2m2 0h2M9 17h2m2 0h2"/></svg>Grupo</button>
   </nav>
 </div>
 
@@ -160,6 +161,7 @@ canvas{max-width:100%;}
   <p class="hint">Selecione a planilha Excel (.xlsx) — leitura exata — ou o PDF. Pode escolher vários arquivos de uma vez (importação em lote). Confira antes de salvar; datas iguais são substituídas.</p>
   <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
   <input type="file" id="pdf" accept=".xlsx,.xls,.csv,application/pdf" multiple style="display:none" onchange="onFile(event)">
+  <input type="file" id="gfiles" accept=".xls,.xlsx" multiple style="display:none" onchange="onGrupoFiles(event)">
   <div class="fields">
     <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
     <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
@@ -303,16 +305,19 @@ function render(){
   document.getElementById('posSel').innerHTML=DATA.map((d,i)=>i).reverse().map(i=>`<option value="${i}" ${i===CUR?'selected':''}>${DATA[i].date}</option>`).join('');
   document.getElementById('prev').disabled=CUR<=0;document.getElementById('next').disabled=CUR>=DATA.length-1;
   const m=document.getElementById('main');
+  document.getElementById('fab').classList.toggle('hidden', !isManager || TAB==='grupo');
   if(TAB==='painel')m.innerHTML=painel(p,pr);
   else if(TAB==='liquidez')m.innerHTML=liquidez(p);
   else if(TAB==='divida')m.innerHTML=divida(p);
+  else if(TAB==='grupo'){m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
   else m.innerHTML=historico();
   if(TAB==='historico')drawChart();
 }
 function renderEmpty(){
   document.getElementById('posSel').innerHTML='<option>—</option>';
   document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
-  document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.':'<br>Aguarde o gerente alimentar.')+'</div>';
+  if(TAB==='grupo'){document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
+  document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.'  :'<br>Aguarde o gerente alimentar.')+'</div>';
 }
 
 function painel(p,pr){return `<h1>Painel executivo</h1>
@@ -585,6 +590,212 @@ function extract(t){
     chl:find(new RegExp('Total Limite de Cheque[^\\d]*'+num,'i')),chu:'',
     div:find(new RegExp('D[ÍI]VIDAS BANC[ÁA]RIAS \\(E\\+F\\+G\\+H\\)[^\\d]*'+num,'i')),res:find(new RegExp('RESULTADO \\(CR[ÉE]DITOS[^\\d]*'+num,'i'))};
 }
+/* ==================== ÁREA GRUPO (fluxo de caixa das empresas) ==================== */
+let GDATA=null,GEMP={},GSEL='all',GPER='mes',GALERTS=false,gchart=null,GBUSY=false;
+function normU(s){return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
+function gsel(v){GSEL=v;render();}
+function gper(v){GPER=v;render();}
+function gtoggleAlerts(){GALERTS=!GALERTS;render();}
+function toISO(d){const p=d.split('/');return p[2]+'-'+p[1]+'-'+p[0];}
+function fromISO(d){const p=(''+d).slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+function classLanc(r){const h=normU(r.hist||'');
+  if(h.indexOf('TRANSFERENCIA ENTRE CONTAS')>=0)return 'ti';
+  if(h.indexOf('APORTE DE CAPITAL')>=0||h.indexOf('APORTE CAPITAL')>=0||/\bMUTUO\b/.test(h))return 'ig';
+  return 'n';}
+async function loadGrupo(){
+  if(GBUSY)return;GBUSY=true;
+  try{
+    const em=await sb.from('empresas').select('*').order('cod');
+    GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
+    let all=[],from=0;
+    while(true){
+      const {data,error}=await sb.from('lancamentos').select('cod,data,hist,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
+      if(error)break;
+      all=all.concat(data||[]);
+      if(!data||data.length<1000)break;
+      from+=1000;
+    }
+    all.forEach(r=>{r.desp=+r.desp;r.rec=+r.rec;r.cl=classLanc(r);});
+    GDATA=all;
+  }catch(e){GDATA=[];}
+  GBUSY=false;
+  if(TAB==='grupo')render();
+}
+function gbucket(iso){
+  if(GPER==='dia')return iso.slice(0,10);
+  if(GPER==='semana'){const d=new Date(iso.slice(0,10)+'T12:00:00');const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10);}
+  return iso.slice(0,7);
+}
+function gblabel(b){
+  if(GPER==='mes'){const p=b.split('-');return p[1]+'/'+p[0];}
+  if(GPER==='semana')return 'sem '+fromISO(b).slice(0,5);
+  return fromISO(b).slice(0,5);
+}
+function grupoRows(){
+  if(!GDATA)return [];
+  return GDATA.filter(r=>{
+    if(GSEL==='all'){return r.cl==='n';}
+    return r.cod===GSEL && r.cl!=='ti';
+  });
+}
+function grupoAlertsCalc(){
+  const r1={},outs=[],ins=[];
+  (GDATA||[]).forEach(r=>{
+    if(r.cl==='ti'){const k=r.cod+'|'+r.data;if(!r1[k])r1[k]=[0,0];r1[k][0]+=r.desp;r1[k][1]+=r.rec;}
+    if(r.cl==='ig'){if(r.desp>0)outs.push(r);if(r.rec>0)ins.push(r);}
+  });
+  const a1=[];for(const k in r1){const v=r1[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
+  const usedIn=new Set(),a2=[];
+  outs.forEach(o=>{
+    let hit=-1;
+    for(let i=0;i<ins.length;i++){if(!usedIn.has(i)&&ins[i].cod!==o.cod&&ins[i].data===o.data&&Math.abs(ins[i].rec-o.desp)<0.01){hit=i;break;}}
+    if(hit>=0)usedIn.add(hit);else a2.push(o);
+  });
+  const a3=ins.filter((x,i)=>!usedIn.has(i));
+  a1.sort((a,b)=>a.data<b.data?-1:1);
+  return {a1:a1,a2:a2,a3:a3};
+}
+function grupoView(){
+  const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>':'';
+  if(GDATA===null)return '<h1>Grupo Apex</h1><div class="empty">Carregando lançamentos…</div>';
+  if(!GDATA.length)return '<h1>Grupo Apex</h1><div class="empty">Nenhum lançamento importado.'+(isManager?'<br><br>':'<br>Aguarde o gerente alimentar.')+'</div><div style="text-align:center">'+mgrBtn+'</div>';
+  const rows=grupoRows();
+  let tr=0,td=0;rows.forEach(r=>{tr+=r.rec;td+=r.desp;});
+  const codes=Object.keys(GEMP).sort((a,b)=>+a-+b);
+  const opts='<option value="all"'+(GSEL==='all'?' selected':'')+'>Consolidado ('+codes.length+' empresas)</option>'+
+    codes.map(c=>'<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>').join('');
+  const per=(v,l)=>'<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';
+  const note=GSEL==='all'
+    ?'Consolidado sem transferências internas e sem aportes/mútuos intragrupo (eliminações).'
+    :'Empresa sem transferências entre contas próprias; aportes/mútuos incluídos.';
+  let rank='';
+  if(GSEL==='all'){
+    const byc={};GDATA.forEach(r=>{if(r.cl!=='n')return;if(!byc[r.cod])byc[r.cod]=0;byc[r.cod]+=r.rec-r.desp;});
+    const list=Object.keys(byc).map(c=>({c:c,v:byc[c]})).sort((a,b)=>b.v-a.v);
+    rank='<div class="sect">Geração própria de caixa por empresa (período todo)</div><div class="card">'+
+      list.map(x=>'<div class="line"><span>'+x.c+' - '+((GEMP[x.c]||{}).emp||'?').slice(0,30)+'</span><span class="'+(x.v>=0?'up':'down')+'" style="font-weight:600">'+(x.v>=0?'+':'−')+' '+BRL(Math.abs(x.v)).replace('R$ ','R$ ')+'</span></div>').join('')+'</div>';
+  }
+  const al=grupoAlertsCalc();const nAl=al.a1.length+al.a2.length+al.a3.length;
+  let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência: '+nAl+' pendência(s) '+(GALERTS?'▲':'▼')+'</div>';
+  if(GALERTS){
+    alerts+='<div class="card" style="max-height:260px;overflow-y:auto">';
+    if(!nAl)alerts+='<div class="line"><span>Nenhuma pendência encontrada.</span></div>';
+    al.a1.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
+    al.a2.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' aporte/mútuo enviado sem espelho</span><span class="v" style="font-size:12px">'+BRL(x.desp)+'</span></div>';});
+    al.a3.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' aporte/mútuo recebido sem origem</span><span class="v" style="font-size:12px">'+BRL(x.rec)+'</span></div>';});
+    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). Pendências R2 podem indicar empresa ainda não importada.</div>';
+  }
+  return '<h1>Grupo Apex</h1>'+
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
+    '<select onchange="gsel(this.value)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">'+opts+'</select>'+mgrBtn+'</div>'+
+    '<div class="toggle">'+per('mes','Mês')+per('semana','Semana')+per('dia','Dia')+'</div>'+
+    '<div class="row2">'+
+    '<div class="kpi"><div class="lbl">Receitas</div><div class="big sm up">'+MM(tr)+'</div></div>'+
+    '<div class="kpi"><div class="lbl">Despesas</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
+    '<div class="kpi"><div class="lbl">Resultado do período</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
+    '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
+    '<div class="note" style="text-align:left">'+note+'</div>'+
+    rank+alerts+
+    '<div class="note" id="gimpNote"></div>';
+}
+function drawGrupoChart(){
+  const ctx=document.getElementById('gcv');if(!ctx)return;if(gchart)gchart.destroy();
+  const rows=grupoRows();const agg={};
+  rows.forEach(r=>{const b=gbucket(r.data);if(!agg[b])agg[b]=[0,0];agg[b][0]+=r.rec;agg[b][1]+=r.desp;});
+  const keys=Object.keys(agg).sort();
+  const show=keys.slice(-(GPER==='dia'?31:GPER==='semana'?26:24));
+  gchart=new Chart(ctx,{type:'bar',data:{labels:show.map(gblabel),datasets:[
+    {label:'Receitas',data:show.map(k=>agg[k][0]/1e6),backgroundColor:'#1D9E75'},
+    {label:'Despesas',data:show.map(k=>agg[k][1]/1e6),backgroundColor:'#E24B4A'}]},
+    options:{plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},
+      scales:{y:{ticks:{callback:v=>v+' MM',font:{size:10}}},x:{ticks:{font:{size:10}}}}}});
+}
+function parseUau(wb,fname){
+  var m=fname.match(/^(\d+)\s*-\s*Fluxo de Caixa\s*(.+?)\.xls[x]?$/i);
+  if(!m)return null;
+  var cod=m[1],emp=m[2].trim();
+  var sh=wb.Sheets[wb.SheetNames[0]];
+  var grid=XLSX.utils.sheet_to_json(sh,{header:1,raw:true,defval:null});
+  var saldoIni=null,periodo='';
+  for(var r=0;r<Math.min(10,grid.length);r++){
+    for(var c=0;c<(grid[r]||[]).length;c++){
+      var t=''+grid[r][c];
+      if(t.indexOf('Saldo te')>=0){for(var j=c+1;j<grid[r].length;j++){if(typeof grid[r][j]==='number'){saldoIni=grid[r][j];break;}}}
+      var pm=t.match(/(\d{2}\/\d{2}\/\d{4}) a (\d{2}\/\d{2}\/\d{4})/);if(pm)periodo=pm[1]+' a '+pm[2];
+    }
+  }
+  var hr=-1;
+  for(var r=0;r<Math.min(20,grid.length);r++){if((grid[r]||[]).some(function(c){return (''+c).trim()==='Data';})){hr=r;break;}}
+  if(hr<0)return null;
+  var hdr=grid[hr].map(function(c){return (''+c).trim();});
+  function col(n){for(var i=0;i<hdr.length;i++){if(hdr[i].indexOf(n)>=0)return i;}return null;}
+  var iT=col('Tipo'),iN=col('Nominal'),iH=col('Hist'),iO=col('Obra');
+  var rows=[],dre=/^\d{2}\/\d{2}\/\d{4}$/;
+  for(var r=hr+1;r<grid.length;r++){
+    var row=grid[r]||[];var d=(''+(row[0]==null?'':row[0])).trim();
+    if(dre.test(d)){
+      var nums=[];for(var i=0;i<row.length;i++){if(typeof row[i]==='number')nums.push(row[i]);}
+      if(nums.length<3)continue;
+      rows.push({data:d,tipo:(''+(row[iT]||'')).trim(),nominal:(''+(row[iN]||'')).trim(),
+        hist:(''+(row[iH]||'')).trim(),obra:(''+(row[iO]||'')).trim(),
+        desp:nums[nums.length-3],rec:nums[nums.length-2],saldo:nums[nums.length-1]});
+    } else if(rows.length&&d===''){
+      var extra=[iN,iH,iO].map(function(i){return i!=null?(''+(row[i]==null?'':row[i])).trim():'';})
+        .filter(function(x){return x&&x!=='N/A';}).join(' ');
+      var f0=(''+(row[0]==null?'':row[0])).trim();
+      if(extra&&f0.indexOf('Total')!==0&&f0.indexOf('(*)')!==0&&f0.indexOf('UAU')!==0){
+        rows[rows.length-1].hist=(rows[rows.length-1].hist+' '+extra).trim();
+      }
+    }
+  }
+  return {cod:cod,emp:emp,saldoIni:saldoIni,periodo:periodo,rows:rows};
+}
+async function onGrupoFiles(ev){
+  const files=[...ev.target.files];ev.target.value='';
+  if(!files.length||!isManager)return;
+  const note=()=>document.getElementById('gimpNote');
+  const say=t=>{const n=note();if(n)n.textContent=t;};
+  say('Lendo '+files.length+' arquivo(s)…');
+  const parsed=[],errs=[];
+  for(const f of files){
+    try{
+      const buf=await f.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array',raw:true});
+      const p=parseUau(wb,f.name);
+      if(!p||!p.rows.length)throw 0;
+      const tr=p.rows.reduce((a,r)=>a+r.rec,0),td=p.rows.reduce((a,r)=>a+r.desp,0);
+      const calc=(p.saldoIni||0)+tr-td,last=p.rows[p.rows.length-1].saldo;
+      p.ok=Math.abs(calc-last)<0.05;
+      parsed.push(p);
+    }catch(e){errs.push(f.name);}
+  }
+  if(!parsed.length){say('Nenhum arquivo válido. Nomeie como "NN - Fluxo de Caixa EMPRESA.xls".');return;}
+  const bad=parsed.filter(p=>!p.ok);
+  let msg='Importar '+parsed.length+' empresa(s)?\n'+parsed.map(p=>'• ['+p.cod+'] '+p.emp+' — '+p.rows.length+' lçtos '+(p.ok?'(validação OK)':'(ATENÇÃO: saldo não confere)')).join('\n');
+  if(errs.length)msg+='\n\nNão lidos: '+errs.join(', ');
+  msg+='\n\nOs lançamentos do período de cada empresa serão substituídos.';
+  if(!confirm(msg)){say('Importação cancelada.');return;}
+  let done=0;
+  for(const p of parsed){
+    say('Gravando ['+p.cod+'] '+p.emp+'… ('+(done+1)+'/'+parsed.length+')');
+    let d0,d1;
+    if(p.periodo){const pp=p.periodo.split(' a ');d0=toISO(pp[0]);d1=toISO(pp[1]);}
+    else{const ds=p.rows.map(r=>toISO(r.data)).sort();d0=ds[0];d1=ds[ds.length-1];}
+    const del=await sb.from('lancamentos').delete().eq('cod',p.cod).gte('data',d0).lte('data',d1);
+    if(del.error){say('Erro ao limpar ['+p.cod+']: '+del.error.message);return;}
+    const rows=p.rows.map(r=>({cod:p.cod,emp:p.emp,data:toISO(r.data),tipo:r.tipo,nominal:r.nominal.slice(0,180),hist:r.hist.slice(0,400),obra:r.obra.slice(0,180),desp:r.desp,rec:r.rec}));
+    for(let i=0;i<rows.length;i+=400){
+      const ins=await sb.from('lancamentos').insert(rows.slice(i,i+400));
+      if(ins.error){say('Erro ao gravar ['+p.cod+']: '+ins.error.message);return;}
+    }
+    await sb.from('empresas').upsert({cod:p.cod,emp:p.emp,saldo_ini:p.saldoIni,periodo:p.periodo,updated_at:new Date().toISOString()},{onConflict:'cod'});
+    done++;
+  }
+  say(done+' empresa(s) importada(s).');
+  GDATA=null;loadGrupo();
+}
+/* ==================== FIM ÁREA GRUPO ==================== */
+
 boot();
 </script>
 </body>
