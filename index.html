@@ -751,15 +751,19 @@ function grupoView(){
       (m.aplic>0.005?'<div class="line"><span>Movimentos de aplicação/resgate</span><span class="v">'+BRL(m.aplic)+'</span></div>':'')+
       '</div>';
   }
-  const nAl=GAL.a1.length+GAL.a2.length;
-  const r4tot=GAL.a4.reduce(function(a,x){return a+x.desp+x.rec;},0);
-  let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência: '+nAl+' pendência(s)'+(GAL.a4.length?' · '+GAL.a4.length+' aporte(s) regra 4':'')+' '+(GALERTS?'▲':'▼')+'</div>';
+  const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
+  const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
+  const fA4=GSEL==='all'?GAL.a4:GAL.a4.filter(function(x){return x.cod===GSEL;});
+  const nAl=fA1.length+fA2.length;
+  const r4tot=fA4.reduce(function(a,x){return a+x.desp+x.rec;},0);
+  const escopo=GSEL==='all'?' (grupo)':' (desta empresa)';
+  let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência'+escopo+': '+nAl+' pendência(s)'+(fA4.length?' · '+fA4.length+' aporte(s) regra 4':'')+' '+(GALERTS?'▲':'▼')+'</div>';
   if(GALERTS){
     alerts+='<div class="card" style="max-height:280px;overflow-y:auto">';
-    if(!nAl&&!GAL.a4.length)alerts+='<div class="line"><span>Nenhuma pendência encontrada.</span></div>';
-    GAL.a1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
-    GAL.a2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
-    if(GAL.a4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes p/ empresas do grupo fora dos 23 arquivos (JAX/JR6/R26/SQNW/Aria)</span><span class="v" style="font-size:12px">'+GAL.a4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
+    if(!nAl&&!fA4.length)alerts+='<div class="line"><span>Nenhuma pendência'+escopo+'.</span></div>';
+    fA1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
+    fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
+    if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes p/ empresas do grupo fora dos 23 arquivos (JAX/JR6/R26/SQNW/Aria)</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
     alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: esperados, sem espelho porque a destinatária não está entre os arquivos importados.</div>';
   }
   return '<h1>Grupo Apex</h1>'+
