@@ -592,6 +592,8 @@ function extract(t){
 }
 /* ==================== ÁREA GRUPO (fluxo de caixa das empresas) ==================== */
 let GDATA=null,GEMP={},GSEL='all',GPER='mes',GALERTS=false,gchart=null,GBUSY=false;
+let GLEG=false;
+function gtoggleLeg(){GLEG=!GLEG;render();}
 function normU(s){return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
 function gsel(v){GSEL=v;render();}
 function gper(v){GPER=v;render();}
@@ -735,35 +737,36 @@ function grupoView(){
   let rank='';
   if(GSEL==='all'){
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
-    rank='<div class="sect">Desempenho por empresa — negócio × grupo (período todo)</div><div class="card" style="max-height:340px;overflow-y:auto">'+
+    rank='<div class="sect">Desempenho por empresa — operacional × investimento × financiamento</div><div class="card" style="max-height:340px;overflow-y:auto">'+
       list.map(function(x){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'+
           '<span style="font-size:13px;font-weight:600">'+x.c+' - '+((GEMP[x.c]||{}).emp||'?').slice(0,28)+'</span>'+badge(x.m)+'</div>'+
           '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mut)">'+
-          '<span>Negócio: R '+MM(x.m.recNeg)+' · D '+MM(x.m.despNeg)+'</span>'+
-          '<span class="'+(x.ger>=0?'up':'down')+'" style="font-weight:600">Geração '+(x.ger>=0?'+':'−')+MM(Math.abs(x.ger)).replace('R$ ','')+'</span></div>'+
-          (Math.abs(x.gl)>0.005?'<div style="font-size:11px;color:var(--mut2)">Grupo: '+(x.gl>=0?'recebeu +':'enviou −')+MM(Math.abs(x.gl)).replace('R$ ','')+' líq.</div>':'')+
-          (Math.abs((x.m.recS||0)-(x.m.despS||0))>0.005?'<div style="font-size:11px;color:var(--mut2)">Sócios: '+(((x.m.recS||0)-(x.m.despS||0))>=0?'recebeu +':'pagou −')+MM(Math.abs((x.m.recS||0)-(x.m.despS||0))).replace('R$ ','')+' líq.</div>':'')+
+          '<span>Operacional: E '+MM(x.m.recNeg)+' · S '+MM(x.m.despNeg)+'</span>'+
+          '<span class="'+(x.ger>=0?'up':'down')+'" style="font-weight:600">Operac. '+(x.ger>=0?'+':'−')+MM(Math.abs(x.ger)).replace('R$ ','')+'</span></div>'+
+          (function(){var vi=x.m.dfc.inv[0]-x.m.dfc.inv[1],vf=x.m.dfc.fin[0]-x.m.dfc.fin[1],vs=(x.m.recS||0)-(x.m.despS||0);
+            if(Math.abs(vi)<0.005&&Math.abs(vf)<0.005)return '';
+            return '<div style="font-size:11px;color:var(--mut2)">Investimento '+(vi>=0?'+':'−')+MM(Math.abs(vi)).replace('R$ ','')+' · Financiamento '+(vf>=0?'+':'−')+MM(Math.abs(vf)).replace('R$ ','')+(Math.abs(vs)>0.005?' (sócios '+(vs>=0?'+':'−')+MM(Math.abs(vs)).replace('R$ ','')+')':'')+'</div>';})()+
           '</div>';
       }).join('')+'</div>'+
-      '<div class="note" style="text-align:left">Negócio = atividade operacional (sem aportes, mútuos, sócios, aplicações, empréstimos e transferências internas). Geração = entradas − saídas operacionais.</div>';
+      '<div class="note" style="text-align:left">Operacional = atividade própria (clientes, fornecedores, folha, impostos). Investimento inclui aportes enviados ao grupo e aplicações. Financiamento inclui aportes recebidos, sócios e empréstimos.</div>';
   } else {
-    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,aplic:0};
-    const ger=m.recNeg-m.despNeg, gl=m.recG-m.despG;
-    rank='<div class="sect">Desempenho — negócio × grupo</div>'+
+    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]}};
+    const ger=m.recNeg-m.despNeg;
+    const vinv=m.dfc.inv[0]-m.dfc.inv[1], vfin=m.dfc.fin[0]-m.dfc.fin[1];
+    rank='<div class="sect">Desempenho — operacional × investimento × financiamento</div>'+
       '<div class="card">'+
       '<div class="line"><span>Situação</span><span>'+badge(m)+'</span></div>'+
-      '<div class="line"><span>Receita do negócio</span><span class="v up">'+BRL(m.recNeg)+'</span></div>'+
-      '<div class="line"><span>Despesa do negócio</span><span class="v down">'+BRL(m.despNeg)+'</span></div>'+
-      '<div class="line"><span><b>Geração própria de caixa</b></span><span class="'+(ger>=0?'up':'down')+'" style="font-weight:600">'+(ger>=0?'+':'−')+' '+BRL(Math.abs(ger))+'</span></div>'+
-      '<div class="line"><span>Recebido do grupo (aportes/mútuos)</span><span class="v">'+BRL(m.recG)+'</span></div>'+
-      '<div class="line"><span>Enviado ao grupo</span><span class="v">'+BRL(m.despG)+'</span></div>'+
-      '<div class="line"><span><b>Fluxo líquido com o grupo</b></span><span class="'+(gl>=0?'up':'down')+'" style="font-weight:600">'+(gl>=0?'+':'−')+' '+BRL(Math.abs(gl))+'</span></div>'+
-      '<div class="line"><span>Recebido de sócios (PF)</span><span class="v">'+BRL(m.recS||0)+'</span></div>'+
-      '<div class="line"><span>Pago a sócios (distribuições)</span><span class="v">'+BRL(m.despS||0)+'</span></div>'+
-      '<div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((m.recS-m.despS)>=0?'up':'down')+'" style="font-weight:600">'+((m.recS-m.despS)>=0?'+':'−')+' '+BRL(Math.abs((m.recS||0)-(m.despS||0)))+'</span></div>'+
-      (m.aplic>0.005?'<div class="line"><span>Movimentos de aplicação/resgate</span><span class="v">'+BRL(m.aplic)+'</span></div>':'')+
+      '<div class="line"><span>Entradas operacionais</span><span class="v up">'+BRL(m.recNeg)+'</span></div>'+
+      '<div class="line"><span>Saídas operacionais</span><span class="v down">'+BRL(m.despNeg)+'</span></div>'+
+      '<div class="line"><span><b>Resultado operacional</b></span><span class="'+(ger>=0?'up':'down')+'" style="font-weight:600">'+(ger>=0?'+':'−')+' '+BRL(Math.abs(ger))+'</span></div>'+
+      '<div class="line"><span><b>Investimento (líquido)</b></span><span class="'+(vinv>=0?'up':'down')+'" style="font-weight:600">'+(vinv>=0?'+':'−')+' '+BRL(Math.abs(vinv))+'</span></div>'+
+      (m.despG>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aportes/mútuos enviados ao grupo</span><span class="v">'+BRL(m.despG)+'</span></div>':'')+
+      (m.aplic>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aplicações e resgates</span><span class="v">'+BRL(m.aplic)+'</span></div>':'')+
+      '<div class="line"><span><b>Financiamento (líquido)</b></span><span class="'+(vfin>=0?'up':'down')+'" style="font-weight:600">'+(vfin>=0?'+':'−')+' '+BRL(Math.abs(vfin))+'</span></div>'+
+      (m.recG>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aportes/mútuos recebidos do grupo</span><span class="v">'+BRL(m.recG)+'</span></div>':'')+
+      ((m.recS||0)+(m.despS||0)>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Sócios: recebido / pago</span><span class="v">'+BRL(m.recS||0)+' / '+BRL(m.despS||0)+'</span></div>':'')+
       '</div>';
   }
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
@@ -790,6 +793,15 @@ function grupoView(){
     '<div class="kpi"><div class="lbl">Saídas operacionais</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
     '<div class="kpi"><div class="lbl">Resultado operacional</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
     (GSEL==='all'?dfcCard(GDFC,'Fluxo por atividade — grupo (DFC)'):dfcCard((GMET[GSEL]||{dfc:{op:[0,0],inv:[0,0],fin:[0,0]}}).dfc,'Fluxo por atividade — empresa (DFC)'))+
+    '<div class="sect" style="cursor:pointer" onclick="gtoggleLeg()">O que significa cada atividade? '+(GLEG?'▲':'▼')+'</div>'+
+    (GLEG?'<div class="card" style="font-size:12px;line-height:1.6">'+
+      '<p style="margin:0 0 8px"><b>DFC</b> (Demonstração dos Fluxos de Caixa) organiza o dinheiro que entra e sai em três naturezas:</p>'+
+      '<p style="margin:0 0 8px"><b style="color:var(--green)">Operacional</b> — o dia a dia do negócio: recebimentos de clientes e obras, pagamentos a fornecedores, folha, impostos e tarifas. É o motor da empresa: resultado <b>positivo</b> indica que a operação se sustenta sozinha.</p>'+
+      '<p style="margin:0 0 8px"><b style="color:var(--blue)">Investimento</b> — dinheiro aplicado para render ou expandir: aplicações financeiras e resgates, rendimentos, e aportes/mútuos <b>enviados</b> a outras empresas. Negativo normalmente significa que a empresa está investindo (não é um problema em si).</p>'+
+      '<p style="margin:0 0 8px"><b style="color:var(--red)">Financiamento</b> — como a empresa se capitaliza: empréstimos e amortizações (BRB, BNDES), aportes/mútuos <b>recebidos</b> de outras empresas e o fluxo com os sócios (aportes recebidos e distribuições pagas). Positivo = captou recursos; negativo = pagou dívida/distribuiu.</p>'+
+      '<p style="margin:0;color:var(--mut)">Leitura rápida: o ideal é o Operacional financiar o Investimento e o Financiamento. Se o Operacional é negativo e o Financiamento positivo, a empresa está sendo sustentada por dívida, grupo ou sócios.</p>'+
+      '<p style="margin:8px 0 0;color:var(--mut2);font-size:11px">Transferências entre contas da própria empresa não entram. No consolidado do grupo, fluxos entre empresas são eliminados.</p>'+
+      '</div>':'')+
     (GSEL==='all'?(function(){var rs=0,ds=0;for(var c in GMET){rs+=GMET[c].recS||0;ds+=GMET[c].despS||0;}return '<div class="card"><div class="line"><span>Recebido de sócios (PF)</span><span class="v up">'+BRL(rs)+'</span></div><div class="line"><span>Pago a sócios (distribuições)</span><span class="v down">'+BRL(ds)+'</span></div><div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((rs-ds)>=0?'up':'down')+'" style="font-weight:600">'+((rs-ds)>=0?'+':'−')+' '+BRL(Math.abs(rs-ds))+'</span></div></div>';})():'')+
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
