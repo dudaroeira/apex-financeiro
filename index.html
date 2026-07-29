@@ -684,15 +684,17 @@ function computeMet(){
   GMET={};GDFC={op:[0,0],inv:[0,0],fin:[0,0]};
   if(!GDATA)return;
   GDATA.forEach(function(r,i){
-    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]}};
+    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
     if(r.cl==='ti'){r.at='ti';return;}
     var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
-    if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;return;}
+    if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;m.b.finG[0]+=r.rec;m.b.invG[1]+=r.desp;return;}
     var at=r.cl==='soc'?'fin':(r.cl==='bk'?'inv':atOf(r));
     r.at=at;
     m.dfc[at][0]+=r.rec;m.dfc[at][1]+=r.desp;
     GDFC[at][0]+=r.rec;GDFC[at][1]+=r.desp;
-    if(at==='op'){m.recNeg+=r.rec;m.despNeg+=r.desp;}
+    if(at==='op'){m.recNeg+=r.rec;m.despNeg+=r.desp;m.b.op[0]+=r.rec;m.b.op[1]+=r.desp;}
+    if(at==='inv'){m.b.invA[0]+=r.rec;m.b.invA[1]+=r.desp;}
+    if(at==='fin'){if(r.cl==='soc'){m.b.finS[0]+=r.rec;m.b.finS[1]+=r.desp;}else{m.b.finD[0]+=r.rec;m.b.finD[1]+=r.desp;}}
     if(r.cl==='soc'){m.recS+=r.rec;m.despS+=r.desp;}
     if(r.cl==='bk'){m.aplic+=r.rec+r.desp;}
   });
@@ -752,22 +754,43 @@ function grupoView(){
       }).join('')+'</div>'+
       '<div class="note" style="text-align:left">Operacional = atividade própria (clientes, fornecedores, folha, impostos). Investimento inclui aportes enviados ao grupo e aplicações. Financiamento inclui aportes recebidos, sócios e empréstimos.</div>';
   } else {
-    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]}};
-    const ger=m.recNeg-m.despNeg;
-    const vinv=m.dfc.inv[0]-m.dfc.inv[1], vfin=m.dfc.fin[0]-m.dfc.fin[1];
-    rank='<div class="sect">Desempenho — operacional × investimento × financiamento</div>'+
+    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
+    const B=m.b||{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
+    function _sig(v){return (v>=0?'+ ':'− ')+BRL(Math.abs(v));}
+    function _cls(v){return v>=0?'up':'down';}
+    function _fl(nome,v,neg){if(Math.abs(v)<0.005)return '';var shown=neg?-v:v;return '<div class="line"><span style="padding-left:12px;color:var(--mut)">'+nome+'</span><span class="v '+_cls(shown)+'">'+_sig(shown)+'</span></div>';}
+    function _sub(nome,v){return '<div class="line" style="background:#F4F6F9;margin:0 -16px;padding:9px 16px"><span><b>'+nome+'</b></span><span class="'+_cls(v)+'" style="font-weight:700">'+_sig(v)+'</span></div>';}
+    const vop=B.op[0]-B.op[1];
+    const vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1]);
+    const vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
+    const vtot=vop+vinv+vfin;
+    const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
+    let frase='No período, a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
+    if(Math.abs(vinv)>0.005)frase+=(vinv<0?'A empresa direcionou '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (sobretudo aportes ao grupo)':'')+'. ':'Resgates/retornos de investimentos trouxeram '+BRL(vinv)+'. ');
+    if(Math.abs(vfin)>0.005)frase+=(vfin>=0?'Captou '+BRL(vfin)+' em financiamento'+((B.finS[0]-B.finS[1])>0.005?' (principalmente sócios)':'')+'. ':'Devolveu '+BRL(Math.abs(vfin))+' em financiamento (dívida/distribuições). ');
+    frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+' no período.';
+    rank='<div class="sect">Resumo do caixa — '+nomeEmp+'</div>'+
       '<div class="card">'+
       '<div class="line"><span>Situação</span><span>'+badge(m)+'</span></div>'+
-      '<div class="line"><span>Entradas operacionais</span><span class="v up">'+BRL(m.recNeg)+'</span></div>'+
-      '<div class="line"><span>Saídas operacionais</span><span class="v down">'+BRL(m.despNeg)+'</span></div>'+
-      '<div class="line"><span><b>Resultado operacional</b></span><span class="'+(ger>=0?'up':'down')+'" style="font-weight:600">'+(ger>=0?'+':'−')+' '+BRL(Math.abs(ger))+'</span></div>'+
-      '<div class="line"><span><b>Investimento (líquido)</b></span><span class="'+(vinv>=0?'up':'down')+'" style="font-weight:600">'+(vinv>=0?'+':'−')+' '+BRL(Math.abs(vinv))+'</span></div>'+
-      (m.despG>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aportes/mútuos enviados ao grupo</span><span class="v">'+BRL(m.despG)+'</span></div>':'')+
-      (m.aplic>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aplicações e resgates</span><span class="v">'+BRL(m.aplic)+'</span></div>':'')+
-      '<div class="line"><span><b>Financiamento (líquido)</b></span><span class="'+(vfin>=0?'up':'down')+'" style="font-weight:600">'+(vfin>=0?'+':'−')+' '+BRL(Math.abs(vfin))+'</span></div>'+
-      (m.recG>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Aportes/mútuos recebidos do grupo</span><span class="v">'+BRL(m.recG)+'</span></div>':'')+
-      ((m.recS||0)+(m.despS||0)>0.005?'<div class="line"><span style="padding-left:10px;color:var(--mut)">Sócios: recebido / pago</span><span class="v">'+BRL(m.recS||0)+' / '+BRL(m.despS||0)+'</span></div>':'')+
-      '</div>';
+      '<div class="line" style="border-bottom:none;padding-bottom:2px"><span style="font-weight:600;color:var(--mut)">1. OPERAÇÃO (o negócio no dia a dia)</span><span></span></div>'+
+      _fl('Recebeu de clientes/obras',B.op[0])+
+      _fl('Pagou fornecedores, folha, impostos',B.op[1],true)+
+      _sub('Sobrou da operação',vop)+
+      '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">2. INVESTIMENTOS</span><span></span></div>'+
+      _fl('Aportes/mútuos enviados ao grupo',B.invG[1],true)+
+      _fl('Aplicações financeiras (saídas)',B.invA[1],true)+
+      _fl('Resgates e rendimentos',B.invA[0])+
+      _sub('Resultado de investimentos',vinv)+
+      '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">3. FINANCIAMENTO (como se capitalizou)</span><span></span></div>'+
+      _fl('Aportes/mútuos recebidos do grupo',B.finG[0])+
+      _fl('Aportes recebidos dos sócios',B.finS[0])+
+      _fl('Distribuições pagas aos sócios',B.finS[1],true)+
+      _fl('Empréstimos: captado',B.finD[0])+
+      _fl('Empréstimos: amortização/juros',B.finD[1],true)+
+      _sub('Resultado de financiamento',vfin)+
+      '<div class="line" style="margin-top:8px;background:'+(vtot>=0?'#E1F5EE':'#FBE9E9')+';margin-left:-16px;margin-right:-16px;padding:11px 16px"><span style="font-weight:700">VARIAÇÃO DO CAIXA NO PERÍODO</span><span class="'+_cls(vtot)+'" style="font-weight:700;font-size:15px">'+_sig(vtot)+'</span></div>'+
+      '</div>'+
+      '<div class="card" style="background:#F8FAFD"><div style="font-size:12.5px;line-height:1.65;color:var(--txt)"><b>Em resumo:</b> '+frase+'</div></div>';
   }
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
   const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
