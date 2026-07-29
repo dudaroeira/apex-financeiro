@@ -673,19 +673,34 @@ function gblabel(b){
   if(GPER==='semana')return 'sem '+fromISO(b).slice(0,5);
   return fromISO(b).slice(0,5);
 }
-let GMET={};
+let GMET={},GDFC={op:[0,0],inv:[0,0],fin:[0,0]};
+function atOf(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
+  if(/AMORTIZA|EMPRESTIM|FINANCIAMENT|BNDES|CAPITAL DE GIRO|CONSORCIO/.test(t))return 'fin';
+  if(/RENDIMENTO|\bCDB\b|\bLCI\b|IMOBILIZADO|CAPITALIZA/.test(t))return 'inv';
+  return 'op';}
 function computeMet(){
-  GMET={};
+  GMET={};GDFC={op:[0,0],inv:[0,0],fin:[0,0]};
   if(!GDATA)return;
   GDATA.forEach(function(r,i){
-    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0};
-    if(r.cl==='ti')return;
-    if(r.cl==='bk'){m.aplic+=r.rec+r.desp;return;}
-    if(r.cl==='soc'){m.recS+=r.rec;m.despS+=r.desp;return;}
-    var interco=(r.cl==='ig')||GELIM.has(i);
-    if(interco){m.recG+=r.rec;m.despG+=r.desp;}
-    else{m.recNeg+=r.rec;m.despNeg+=r.desp;}
+    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]}};
+    if(r.cl==='ti'){r.at='ti';return;}
+    var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
+    if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;return;}
+    var at=r.cl==='soc'?'fin':(r.cl==='bk'?'inv':atOf(r));
+    r.at=at;
+    m.dfc[at][0]+=r.rec;m.dfc[at][1]+=r.desp;
+    GDFC[at][0]+=r.rec;GDFC[at][1]+=r.desp;
+    if(at==='op'){m.recNeg+=r.rec;m.despNeg+=r.desp;}
+    if(r.cl==='soc'){m.recS+=r.rec;m.despS+=r.desp;}
+    if(r.cl==='bk'){m.aplic+=r.rec+r.desp;}
   });
+}
+function dfcCard(d,titulo){
+  function ln(nome,v){var net=v[0]-v[1];
+    return '<div class="line"><span>'+nome+'</span><span class="v" style="font-size:12px">+'+MM(v[0]).replace('R$ ','')+' · −'+MM(v[1]).replace('R$ ','')+' · <b class="'+(net>=0?'up':'down')+'">'+(net>=0?'+':'−')+MM(Math.abs(net)).replace('R$ ','')+'</b></span></div>';}
+  return '<div class="sect">'+titulo+'</div><div class="card">'+
+    ln('Operacional',d.op)+ln('Investimento',d.inv)+ln('Financiamento',d.fin)+
+    '</div><div class="note" style="text-align:left">Entradas · Saídas · Líquido (R$ MM). Investimento: aplicações/resgates e aportes enviados. Financiamento: empréstimos, aportes recebidos e sócios.</div>';
 }
 function badge(m){
   var ger=m.recNeg-m.despNeg;
@@ -698,8 +713,8 @@ function grupoRows(){
   if(!GDATA)return [];
   const out=[];
   GDATA.forEach(function(r,i){
-    if(GSEL==='all'){if(!GELIM.has(i)&&r.cl!=='soc')out.push(r);}
-    else if(r.cod===GSEL&&r.cl==='n'&&!GELIM.has(i))out.push(r);
+    if(GSEL==='all'){if(r.at==='op')out.push(r);}
+    else if(r.cod===GSEL&&r.at==='op')out.push(r);
   });
   return out;
 }
@@ -715,8 +730,8 @@ function grupoView(){
     codes.map(c=>'<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>').join('');
   const per=(v,l)=>'<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';
   const note=GSEL==='all'
-    ?'Consolidado sem transferências internas e sem aportes/mútuos intragrupo (eliminações).'
-    :'Gráfico e totais mostram apenas o NEGÓCIO da empresa (sem aportes, mútuos e transferências). O fluxo com o grupo aparece no quadro Desempenho.';
+    ?'KPIs e gráfico: atividade OPERACIONAL do grupo (sem intragrupo, sócios, aplicações e financiamentos — ver quadro DFC).'
+    :'Gráfico e totais: atividade OPERACIONAL da empresa. Investimento, financiamento, grupo e sócios aparecem nos quadros DFC e Desempenho.';
   let rank='';
   if(GSEL==='all'){
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
@@ -732,7 +747,7 @@ function grupoView(){
           (Math.abs((x.m.recS||0)-(x.m.despS||0))>0.005?'<div style="font-size:11px;color:var(--mut2)">Sócios: '+(((x.m.recS||0)-(x.m.despS||0))>=0?'recebeu +':'pagou −')+MM(Math.abs((x.m.recS||0)-(x.m.despS||0))).replace('R$ ','')+' líq.</div>':'')+
           '</div>';
       }).join('')+'</div>'+
-      '<div class="note" style="text-align:left">Negócio = receitas/despesas próprias (sem aportes, mútuos, sócios, transferências internas e aplicações). Geração = receita do negócio − despesa do negócio. Fluxo com sócios (PF) mostrado à parte.</div>';
+      '<div class="note" style="text-align:left">Negócio = atividade operacional (sem aportes, mútuos, sócios, aplicações, empréstimos e transferências internas). Geração = entradas − saídas operacionais.</div>';
   } else {
     const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,aplic:0};
     const ger=m.recNeg-m.despNeg, gl=m.recG-m.despG;
@@ -771,9 +786,10 @@ function grupoView(){
     '<select onchange="gsel(this.value)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">'+opts+'</select>'+mgrBtn+'</div>'+
     '<div class="toggle">'+per('mes','Mês')+per('semana','Semana')+per('dia','Dia')+'</div>'+
     '<div class="row2">'+
-    '<div class="kpi"><div class="lbl">Receitas</div><div class="big sm up">'+MM(tr)+'</div></div>'+
-    '<div class="kpi"><div class="lbl">Despesas</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
-    '<div class="kpi"><div class="lbl">Resultado do período</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
+    '<div class="kpi"><div class="lbl">Entradas operacionais</div><div class="big sm up">'+MM(tr)+'</div></div>'+
+    '<div class="kpi"><div class="lbl">Saídas operacionais</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
+    '<div class="kpi"><div class="lbl">Resultado operacional</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
+    (GSEL==='all'?dfcCard(GDFC,'Fluxo por atividade — grupo (DFC)'):dfcCard((GMET[GSEL]||{dfc:{op:[0,0],inv:[0,0],fin:[0,0]}}).dfc,'Fluxo por atividade — empresa (DFC)'))+
     (GSEL==='all'?(function(){var rs=0,ds=0;for(var c in GMET){rs+=GMET[c].recS||0;ds+=GMET[c].despS||0;}return '<div class="card"><div class="line"><span>Recebido de sócios (PF)</span><span class="v up">'+BRL(rs)+'</span></div><div class="line"><span>Pago a sócios (distribuições)</span><span class="v down">'+BRL(ds)+'</span></div><div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((rs-ds)>=0?'up':'down')+'" style="font-weight:600">'+((rs-ds)>=0?'+':'−')+' '+BRL(Math.abs(rs-ds))+'</span></div></div>';})():'')+
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
