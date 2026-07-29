@@ -598,10 +598,48 @@ function gper(v){GPER=v;render();}
 function gtoggleAlerts(){GALERTS=!GALERTS;render();}
 function toISO(d){const p=d.split('/');return p[2]+'-'+p[1]+'-'+p[0];}
 function fromISO(d){const p=(''+d).slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
-function classLanc(r){const h=normU(r.hist||'');
-  if(h.indexOf('TRANSFERENCIA ENTRE CONTAS')>=0)return 'ti';
-  if(h.indexOf('APORTE DE CAPITAL')>=0||h.indexOf('APORTE CAPITAL')>=0||/\bMUTUO\b/.test(h))return 'ig';
+function classLanc(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
+  if(t.indexOf('ENTRE CONTAS')>=0)return 'ti';
+  if(/APORTE.{0,4}CAPITAL|APORTE CAP|\bMUTUO\b/.test(t)||t.indexOf(' P/ ')>=0)return 'ig';
+  if(/APLICA|RESGATE/.test(t))return 'bk';
   return 'n';}
+let GELIM=new Set(),GAL={a1:[],a2:[],a4:[]};
+function computeElim(){
+  GELIM=new Set();GAL={a1:[],a2:[],a4:[]};
+  if(!GDATA)return;
+  const strongIdx={},anyIdx={};
+  GDATA.forEach(function(r,i){
+    if(r.cl==='ti')return;
+    if(r.desp>0){const k=r.data+'|'+r.desp.toFixed(2)+'|d';(anyIdx[k]=anyIdx[k]||[]).push(r.cod);
+      if(r.cl==='ig'){(strongIdx[k]=strongIdx[k]||[]).push(r.cod);}}
+    if(r.rec>0){const k=r.data+'|'+r.rec.toFixed(2)+'|r';(anyIdx[k]=anyIdx[k]||[]).push(r.cod);
+      if(r.cl==='ig'){(strongIdx[k]=strongIdx[k]||[]).push(r.cod);}}
+  });
+  const tiday={};
+  GDATA.forEach(function(r,i){
+    if(r.cl==='ti'){
+      GELIM.add(i);
+      const k=r.cod+'|'+r.data;if(!tiday[k])tiday[k]=[0,0];tiday[k][0]+=r.desp;tiday[k][1]+=r.rec;
+      return;
+    }
+    const val=(r.desp>0?r.desp:r.rec).toFixed(2);
+    if(r.cl==='ig'){
+      GELIM.add(i);
+      const oppSide=r.desp>0?'r':'d';
+      const opp=(anyIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
+      if(!opp){const t=normU((r.hist||'')+' '+(r.nominal||''));
+        if(/JAX|JR6|\bR26\b|SQNW|ARIA/.test(t))GAL.a4.push(r);else GAL.a2.push(r);}
+      return;
+    }
+    if(r.cl==='n'){
+      const oppSide=r.desp>0?'r':'d';
+      const opp=(strongIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
+      if(opp)GELIM.add(i);
+    }
+  });
+  for(const k in tiday){const v=tiday[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');GAL.a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
+  GAL.a1.sort(function(a,b){return a.data<b.data?-1:1;});
+}
 async function loadGrupo(){
   if(GBUSY)return;GBUSY=true;
   try{
@@ -609,14 +647,14 @@ async function loadGrupo(){
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
-      const {data,error}=await sb.from('lancamentos').select('cod,data,hist,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
+      const {data,error}=await sb.from('lancamentos').select('cod,data,hist,nominal,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
       if(error)break;
       all=all.concat(data||[]);
       if(!data||data.length<1000)break;
       from+=1000;
     }
     all.forEach(r=>{r.desp=+r.desp;r.rec=+r.rec;r.cl=classLanc(r);});
-    GDATA=all;
+    GDATA=all;computeElim();
   }catch(e){GDATA=[];}
   GBUSY=false;
   if(TAB==='grupo')render();
@@ -633,28 +671,14 @@ function gblabel(b){
 }
 function grupoRows(){
   if(!GDATA)return [];
-  return GDATA.filter(r=>{
-    if(GSEL==='all'){return r.cl==='n';}
-    return r.cod===GSEL && r.cl!=='ti';
+  const out=[];
+  GDATA.forEach(function(r,i){
+    if(GSEL==='all'){if(!GELIM.has(i))out.push(r);}
+    else if(r.cod===GSEL&&r.cl!=='ti')out.push(r);
   });
+  return out;
 }
-function grupoAlertsCalc(){
-  const r1={},outs=[],ins=[];
-  (GDATA||[]).forEach(r=>{
-    if(r.cl==='ti'){const k=r.cod+'|'+r.data;if(!r1[k])r1[k]=[0,0];r1[k][0]+=r.desp;r1[k][1]+=r.rec;}
-    if(r.cl==='ig'){if(r.desp>0)outs.push(r);if(r.rec>0)ins.push(r);}
-  });
-  const a1=[];for(const k in r1){const v=r1[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
-  const usedIn=new Set(),a2=[];
-  outs.forEach(o=>{
-    let hit=-1;
-    for(let i=0;i<ins.length;i++){if(!usedIn.has(i)&&ins[i].cod!==o.cod&&ins[i].data===o.data&&Math.abs(ins[i].rec-o.desp)<0.01){hit=i;break;}}
-    if(hit>=0)usedIn.add(hit);else a2.push(o);
-  });
-  const a3=ins.filter((x,i)=>!usedIn.has(i));
-  a1.sort((a,b)=>a.data<b.data?-1:1);
-  return {a1:a1,a2:a2,a3:a3};
-}
+
 function grupoView(){
   const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>':'';
   if(GDATA===null)return '<h1>Grupo Apex</h1><div class="empty">Carregando lançamentos…</div>';
@@ -670,20 +694,21 @@ function grupoView(){
     :'Empresa sem transferências entre contas próprias; aportes/mútuos incluídos.';
   let rank='';
   if(GSEL==='all'){
-    const byc={};GDATA.forEach(r=>{if(r.cl!=='n')return;if(!byc[r.cod])byc[r.cod]=0;byc[r.cod]+=r.rec-r.desp;});
+    const byc={};GDATA.forEach(function(r,i){if(GELIM.has(i))return;if(!byc[r.cod])byc[r.cod]=0;byc[r.cod]+=r.rec-r.desp;});
     const list=Object.keys(byc).map(c=>({c:c,v:byc[c]})).sort((a,b)=>b.v-a.v);
     rank='<div class="sect">Geração própria de caixa por empresa (período todo)</div><div class="card">'+
       list.map(x=>'<div class="line"><span>'+x.c+' - '+((GEMP[x.c]||{}).emp||'?').slice(0,30)+'</span><span class="'+(x.v>=0?'up':'down')+'" style="font-weight:600">'+(x.v>=0?'+':'−')+' '+BRL(Math.abs(x.v)).replace('R$ ','R$ ')+'</span></div>').join('')+'</div>';
   }
-  const al=grupoAlertsCalc();const nAl=al.a1.length+al.a2.length+al.a3.length;
-  let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência: '+nAl+' pendência(s) '+(GALERTS?'▲':'▼')+'</div>';
+  const nAl=GAL.a1.length+GAL.a2.length;
+  const r4tot=GAL.a4.reduce(function(a,x){return a+x.desp+x.rec;},0);
+  let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência: '+nAl+' pendência(s)'+(GAL.a4.length?' · '+GAL.a4.length+' aporte(s) regra 4':'')+' '+(GALERTS?'▲':'▼')+'</div>';
   if(GALERTS){
-    alerts+='<div class="card" style="max-height:260px;overflow-y:auto">';
-    if(!nAl)alerts+='<div class="line"><span>Nenhuma pendência encontrada.</span></div>';
-    al.a1.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
-    al.a2.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' aporte/mútuo enviado sem espelho</span><span class="v" style="font-size:12px">'+BRL(x.desp)+'</span></div>';});
-    al.a3.forEach(x=>{alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' aporte/mútuo recebido sem origem</span><span class="v" style="font-size:12px">'+BRL(x.rec)+'</span></div>';});
-    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). Pendências R2 podem indicar empresa ainda não importada.</div>';
+    alerts+='<div class="card" style="max-height:280px;overflow-y:auto">';
+    if(!nAl&&!GAL.a4.length)alerts+='<div class="line"><span>Nenhuma pendência encontrada.</span></div>';
+    GAL.a1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
+    GAL.a2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
+    if(GAL.a4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes p/ empresas do grupo fora dos 23 arquivos (JAX/JR6/R26/SQNW/Aria)</span><span class="v" style="font-size:12px">'+GAL.a4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
+    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: esperados, sem espelho porque a destinatária não está entre os arquivos importados.</div>';
   }
   return '<h1>Grupo Apex</h1>'+
     '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
