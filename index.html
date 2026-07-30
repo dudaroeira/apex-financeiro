@@ -636,9 +636,10 @@ function toISO(d){const p=d.split('/');return p[2]+'-'+p[1]+'-'+p[0];}
 function fromISO(d){const p=(''+d).slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
 function classLanc(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
   if(t.indexOf('ENTRE CONTAS')>=0)return 'ti';
-  if(/AROEIRA|\bSOCIOS?\b/.test(t)
-     ||/APORTE.{0,4}CAPITAL.{0,40}\b(EDUARDO|FABIANO|FABRICIO|RAFAEL|DUDA)\b/.test(t)
-     ||/DISTRIBUI\S* DE LUCROS?.{0,40}\b(EDUARDO|FABIANO|FABRICIO|RAFAEL|DUDA)\b/.test(t))return 'soc';
+  var socName=/AROEIRA|\bSOCIOS?\b|\bDUDA\b/.test(t)||/\b(EDUARDO|FABIANO|FABRICIO|RAFAEL)\b.{0,20}\b(AROEIRA|ALMEIDA)\b/.test(t);
+  var socCtx=/APORTE|\bMUTUO\b|DISTRIBUI|DEVOLU|COBERTURA|LUCR/.test(t);
+  if(/APORTE.{0,4}CAPITAL.{0,40}\b(EDUARDO|FABIANO|FABRICIO|RAFAEL|DUDA)\b/.test(t))return 'soc';
+  if(socName&&socCtx)return 'soc';
   if(/APORTE.{0,4}CAPITAL|APORTE CAP|\bMUTUO\b/.test(t)||t.indexOf(' P/ ')>=0)return 'ig';
   if(/APLICA|RESGATE/.test(t))return 'bk';
   return 'n';}
