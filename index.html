@@ -788,21 +788,21 @@ function grupoView(){
   const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>':'';
   if(GDATA===null)return '<h1>Grupo Apex</h1><div class="empty">Carregando lançamentos…</div>';
   if(!GDATA.length)return '<h1>Grupo Apex</h1><div class="empty">Nenhum lançamento importado.'+(isManager?'<br><br>':'<br>Aguarde o gerente alimentar.')+'</div><div style="text-align:center">'+mgrBtn+'</div>';
-  const rows=grupoRows();
-  let tr=0,td=0;rows.forEach(r=>{tr+=r.rec;td+=r.desp;});
+
   const codes=Object.keys(GEMP).sort((a,b)=>+a-+b);
   const opts='<option value="all"'+(GSEL==='all'?' selected':'')+'>Consolidado ('+codes.length+' empresas)</option>'+
     codes.map(c=>'<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>').join('');
   const per=(v,l)=>'<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';
   const note=GSEL==='all'
-    ?'KPIs e gráfico: atividade OPERACIONAL do grupo (sem intragrupo, sócios, aplicações e financiamentos — ver quadro DFC).'
-    :'Gráfico e totais: atividade OPERACIONAL da empresa. Investimento, financiamento, grupo e sócios aparecem nos quadros DFC e Desempenho.';
-  let rank='';
+    ?'Gráfico: atividade operacional do grupo por período (sem fluxos intragrupo, sócios, aplicações e financiamentos).'
+    :'Gráfico: atividade operacional da empresa por período. As demais atividades estão no Resumo do caixa.';
+  let rank='',ext='';
   if(GSEL==='all'){
     const B0={op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
     for(var c0 in GMET){var b0=GMET[c0].b||{};['op','invA','finS','finD'].forEach(function(k){if(b0[k]){B0[k][0]+=b0[k][0];B0[k][1]+=b0[k][1];}});}
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
-    rank=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true})+'<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
+    ext=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true});
+    rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
       list.map(function(x){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'+
@@ -820,7 +820,7 @@ function grupoView(){
     const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:null};
     const Bc=m.b||{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
     const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
-    rank=extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});
+    ext=extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});rank='';
   }
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
   const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
@@ -846,11 +846,8 @@ function grupoView(){
       '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
       '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>'
       :'<div class="note" style="margin:-4px 0 12px">Mostrando todo o período importado</div>')+
-    '<div class="row2">'+
-    '<div class="kpi"><div class="lbl">Entradas operacionais</div><div class="big sm up">'+MM(tr)+'</div></div>'+
-    '<div class="kpi"><div class="lbl">Saídas operacionais</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
-    '<div class="kpi"><div class="lbl">Resultado operacional</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
-    (GSEL==='all'?dfcCard(GDFC,'Fluxo por atividade — grupo · '+gPerLabel()):dfcCard((GMET[GSEL]||{dfc:{op:[0,0],inv:[0,0],fin:[0,0]}}).dfc,'Fluxo por atividade — empresa · '+gPerLabel()))+
+    ext+
+
     '<div class="sect" style="cursor:pointer" onclick="gtoggleLeg()">O que significa cada atividade? '+(GLEG?'▲':'▼')+'</div>'+
     (GLEG?'<div class="card" style="font-size:12px;line-height:1.6">'+
       '<p style="margin:0 0 8px"><b>DFC</b> (Demonstração dos Fluxos de Caixa) organiza o dinheiro que entra e sai em três naturezas:</p>'+
