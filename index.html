@@ -233,6 +233,7 @@ canvas{max-width:100%;}
 <div class="modal" id="gdrillM"><div class="sheet">
   <h2 id="gdTitle">Lançamentos</h2>
   <p class="hint" id="gdSub"></p>
+  <div class="toggle" id="gdChips" style="margin-bottom:10px"></div>
   <div id="gdList" style="max-height:56vh;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;"></div>
   <div class="btns"><button class="btn-s" onclick="gdrillClose()">Fechar</button></div>
 </div></div>
@@ -1102,17 +1103,28 @@ function gLabel(r){
   if(nmOk&&hiOk&&hi.toUpperCase().indexOf(nm.slice(0,10).toUpperCase())<0)lbl=nm+' — '+hi;
   return lbl.slice(0,52);
 }
-function gdrillShow(title,sub,rows){
-  document.getElementById('gdTitle').textContent=title;
-  document.getElementById('gdSub').textContent=sub;
-  rows=rows.slice().sort(function(a,b){return (b.rec>0?b.rec:b.desp)-(a.rec>0?a.rec:a.desp);});
+let GDR=null;
+function gdrillShow(title,sub,rows,filt){
+  GDR={title:title,sub:sub,f:filt||'all',
+    rows:rows.slice().sort(function(a,b){return (b.rec>0?b.rec:b.desp)-(a.rec>0?a.rec:a.desp);})};
+  gdrillRender();
+  document.getElementById('gdrillM').classList.add('on');
+}
+function gdrillFilter(f){if(GDR){GDR.f=f;gdrillRender();}}
+function gdrillRender(){
+  if(!GDR)return;
+  const nIn=GDR.rows.filter(function(r){return r.rec>0;}).length;
+  const nOut=GDR.rows.filter(function(r){return r.desp>0;}).length;
+  const rows=GDR.rows.filter(function(r){return GDR.f==='in'?r.rec>0:(GDR.f==='out'?r.desp>0:true);});
+  document.getElementById('gdTitle').textContent=GDR.title;
+  document.getElementById('gdSub').textContent=GDR.sub+(rows.length>250?' · mostrando 250 de '+rows.length:'');
+  function chip(v,l){return '<span class="'+(GDR.f===v?'on':'')+'" onclick="gdrillFilter(\''+v+'\')">'+l+'</span>';}
+  document.getElementById('gdChips').innerHTML=chip('all','Todas ('+GDR.rows.length+')')+chip('in','Entradas ('+nIn+')')+chip('out','Saídas ('+nOut+')');
   const lim=rows.slice(0,250);
   document.getElementById('gdList').innerHTML=lim.map(function(r){
     const v=r.rec>0?r.rec:-r.desp;
     return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
   }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
-  if(rows.length>250)document.getElementById('gdSub').textContent=sub+' · mostrando 250 de '+rows.length;
-  document.getElementById('gdrillM').classList.add('on');
 }
 function gdrillClose(){document.getElementById('gdrillM').classList.remove('on');}
 function gdrillObra(ix){const o=GOBRA_LIST[ix];if(o)gdrillShow(o.k,gPerLabel()+' · '+o.rows.length+' lançamentos',o.rows);}
@@ -1243,7 +1255,7 @@ function drawBI(){
   const opm={};mk.forEach(function(k){opm[k]=0;});
   GDATA.forEach(function(r){if(!inScope(r)||r.at!=='op')return;opm[r.data.slice(0,7)]+=r.rec-r.desp;});
   const c1=document.getElementById('bi1');
-  if(c1){GBICH.push(new Chart(c1,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[{data:mk.map(function(k){return opm[k]/1e6;}),backgroundColor:mk.map(function(k){return opm[k]>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index];var rows=GDATA.filter(function(r){return inScope(r)&&r.at==='op'&&r.data.slice(0,7)===k;});gdrillShow('Operacional '+_mlabel(k),rows.length+' lançamentos — toque fora para voltar',rows);},plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
+  if(c1){GBICH.push(new Chart(c1,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[{data:mk.map(function(k){return opm[k]/1e6;}),backgroundColor:mk.map(function(k){return opm[k]>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index];var rows=GDATA.filter(function(r){return inScope(r)&&r.at==='op'&&r.data.slice(0,7)===k;});gdrillShow('Operacional '+_mlabel(k),rows.length+' lançamentos',rows,opm[k]>=0?'in':'out');},plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
   // bi2: activities per month (nets)
   const act={op:{},inv:{},fin:{}};mk.forEach(function(k){act.op[k]=0;act.inv[k]=0;act.fin[k]=0;});
   GDATA.forEach(function(r){if(!inScope(r))return;const k=r.data.slice(0,7);
@@ -1265,15 +1277,15 @@ function drawBI(){
   // bi3: obras top8 net (horizontal)
   const obras=gOpAgg(gObraKey).slice(0,8);
   const c3=document.getElementById('bi3');
-  if(c3){GBICH.push(new Chart(c3,{type:'bar',data:{labels:obras.map(function(o){return _short(o.k,24);}),datasets:[{data:obras.map(function(o){return (o.rec-o.desp)/1e6;}),backgroundColor:obras.map(function(o){return o.rec-o.desp>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var o=obras[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows);},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  if(c3){GBICH.push(new Chart(c3,{type:'bar',data:{labels:obras.map(function(o){return _short(o.k,24);}),datasets:[{data:obras.map(function(o){return (o.rec-o.desp)/1e6;}),backgroundColor:obras.map(function(o){return o.rec-o.desp>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var o=obras[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows,(o.rec-o.desp)>=0?'in':'out');},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
   // bi4/bi5: contrapartes
   const all=gOpAgg(gCptKey);
   const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,8);
   const sai=all.filter(function(x){return x.desp>0;}).sort(function(a,b){return b.desp-a.desp;}).slice(0,8);
   const c4=document.getElementById('bi4');
-  if(c4){GBICH.push(new Chart(c4,{type:'bar',data:{labels:ent.map(function(o){return _short(o.k,24);}),datasets:[{data:ent.map(function(o){return o.rec/1e6;}),backgroundColor:'#1D9E75'}]},options:{onClick:function(e,els){if(!els.length)return;var o=ent[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows);},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  if(c4){GBICH.push(new Chart(c4,{type:'bar',data:{labels:ent.map(function(o){return _short(o.k,24);}),datasets:[{data:ent.map(function(o){return o.rec/1e6;}),backgroundColor:'#1D9E75'}]},options:{onClick:function(e,els){if(!els.length)return;var o=ent[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows,'in');},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
   const c5=document.getElementById('bi5');
-  if(c5){GBICH.push(new Chart(c5,{type:'bar',data:{labels:sai.map(function(o){return _short(o.k,24);}),datasets:[{data:sai.map(function(o){return o.desp/1e6;}),backgroundColor:'#E24B4A'}]},options:{onClick:function(e,els){if(!els.length)return;var o=sai[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows);},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  if(c5){GBICH.push(new Chart(c5,{type:'bar',data:{labels:sai.map(function(o){return _short(o.k,24);}),datasets:[{data:sai.map(function(o){return o.desp/1e6;}),backgroundColor:'#E24B4A'}]},options:{onClick:function(e,els){if(!els.length)return;var o=sai[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows,'out');},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
   // bi6: empresas por resultado operacional (consolidado)
   const c6=document.getElementById('bi6');
   if(c6&&GSEL==='all'){
