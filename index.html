@@ -878,7 +878,7 @@ function grupoView(){
     alerts+='<div class="card" style="max-height:280px;overflow-y:auto">';
     if(!nAl&&!fA4.length)alerts+='<div class="line"><span>Nenhuma pendência'+escopo+'.</span></div>';
     fA1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
-    fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
+    fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+gLabel(x)+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
     if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes a coligadas de outro grupo (JAX/JR6/R26/SQNW/Aria) — contam como Investimento</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
     alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
   }
@@ -955,8 +955,9 @@ function parseUau(wb,fname){
       var extra=[iN,iH,iO].map(function(i){return i!=null?(''+(row[i]==null?'':row[i])).trim():'';})
         .filter(function(x){return x&&x!=='N/A';}).join(' ');
       var f0=(''+(row[0]==null?'':row[0])).trim();
-      if(extra&&f0.indexOf('Total')!==0&&f0.indexOf('(*)')!==0&&f0.indexOf('UAU')!==0){
-        rows[rows.length-1].hist=(rows[rows.length-1].hist+' '+extra).trim();
+      var junk=/FLUXO DE CAIXA GERAL|APEX ENGENHARIA COMERC|USU[ÁA]RIO:|PER[ÍI]ODO DE|SALDO TE[ÓO]RICO|^DATA$|MOEDA:/i;
+      if(extra&&!junk.test(extra)&&f0.indexOf('Total')!==0&&f0.indexOf('(*)')!==0&&f0.indexOf('UAU')!==0){
+        rows[rows.length-1].hist=(rows[rows.length-1].hist+' '+extra).replace(/\s*Fluxo de Caixa Geral\s*/gi,' ').trim();
       }
     }
   }
@@ -1092,6 +1093,15 @@ function biComparativo(){
     ln('Operacional',cur.op,prev.op)+ln('Investimento',cur.inv,prev.inv)+ln('Financiamento',cur.fin,prev.fin)+ln('Variação do caixa',vc,vp)+
     '</div>';
 }
+function gLabel(r){
+  function clean(x){return (''+(x||'')).replace(/Fluxo de Caixa Geral/gi,' ').replace(/\s+/g,' ').trim();}
+  var nm=clean(r.nominal),hi=clean(r.hist);
+  var nmOk=nm&&nm!=='N/A'&&nm.toUpperCase()!=='NAO PERSONALIZADO';
+  var hiOk=hi&&hi.length>=6;
+  var lbl=nmOk?nm:(hiOk?hi:(hi||nm||'(sem descrição)'));
+  if(nmOk&&hiOk&&hi.toUpperCase().indexOf(nm.slice(0,10).toUpperCase())<0)lbl=nm+' — '+hi;
+  return lbl.slice(0,52);
+}
 function gdrillShow(title,sub,rows){
   document.getElementById('gdTitle').textContent=title;
   document.getElementById('gdSub').textContent=sub;
@@ -1099,7 +1109,7 @@ function gdrillShow(title,sub,rows){
   const lim=rows.slice(0,250);
   document.getElementById('gdList').innerHTML=lim.map(function(r){
     const v=r.rec>0?r.rec:-r.desp;
-    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+((r.hist||r.nominal||'').slice(0,42))+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
+    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
   }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
   if(rows.length>250)document.getElementById('gdSub').textContent=sub+' · mostrando 250 de '+rows.length;
   document.getElementById('gdrillM').classList.add('on');
