@@ -153,6 +153,7 @@ canvas{max-width:100%;}
     <button data-t="divida" onclick="go('divida')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h12"/></svg>Dívida</button>
     <button data-t="historico" onclick="go('historico')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Histórico</button>
     <button data-t="grupo" onclick="go('grupo')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h2m2 0h2M9 13h2m2 0h2M9 17h2m2 0h2"/></svg>Grupo</button>
+    <button data-t="bi" onclick="go('bi')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>BI</button>
   </nav>
 </div>
 
@@ -317,6 +318,7 @@ function render(){
   else if(TAB==='liquidez')m.innerHTML=liquidez(p);
   else if(TAB==='divida')m.innerHTML=divida(p);
   else if(TAB==='grupo'){if(GDATA)computeMet(gWin());m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
+  else if(TAB==='bi'){if(GDATA)computeMet(null);m.innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();}
   else m.innerHTML=historico();
   if(TAB==='historico')drawChart();
 }
@@ -324,6 +326,7 @@ function renderEmpty(){
   document.getElementById('posSel').innerHTML='<option>—</option>';
   document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
   if(TAB==='grupo'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
+  if(TAB==='bi'){if(GDATA)computeMet(null);document.getElementById('main').innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();return;}
   document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.'  :'<br>Aguarde o gerente alimentar.')+'</div>';
 }
 
@@ -871,7 +874,7 @@ function grupoView(){
     (GSEL==='all'?(function(){var rs=0,ds=0;for(var c in GMET){rs+=GMET[c].recS||0;ds+=GMET[c].despS||0;}return '<div class="card"><div class="line"><span>Recebido de sócios (PF)</span><span class="v up">'+BRL(rs)+'</span></div><div class="line"><span>Pago a sócios (distribuições)</span><span class="v down">'+BRL(ds)+'</span></div><div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((rs-ds)>=0?'up':'down')+'" style="font-weight:600">'+((rs-ds)>=0?'+':'−')+' '+BRL(Math.abs(rs-ds))+'</span></div></div>';})():'')+
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
-    '<div class="sect">Análises (BI)</div>'+biComparativo()+biObras()+biCpt()+pdfButtons()+
+    pdfButtons()+
     rank+alerts+
     '<div class="note" id="gimpNote"></div>';
 }
@@ -991,9 +994,9 @@ function gScopeRows(win){
   });
   return out;
 }
-function gOpAgg(keyFn){
+function gOpAgg(keyFn,win){
   const map={};
-  gScopeRows().forEach(function(x){
+  gScopeRows(win).forEach(function(x){
     if(x.r.at!=='op')return;
     const k=keyFn(x.r)||'(não informado)';
     if(!map[k])map[k]={k:k,rec:0,desp:0,rows:[]};
@@ -1158,6 +1161,73 @@ function pdfGrupo(completo){
   _output(doc,'Apex_Grupo_'+(completo?'Completo_':'Resumo_')+gPerLabel().replace(/[\/ ]/g,'-')+'.pdf');
 }
 /* ============== FIM BI + PDF GRUPO ============== */
+
+/* ============== ABA BI (gráficos simples) ============== */
+let GBICH=[];
+function biView(){
+  if(GDATA===null)return '<h1>BI</h1><div class="empty">Carregando…</div>';
+  if(!GDATA.length)return '<h1>BI</h1><div class="empty">Nenhum lançamento importado. Importe as planilhas na aba Grupo.</div>';
+  const codes=Object.keys(GEMP).sort(function(a,b){return +a-+b;});
+  const opts='<option value="all"'+(GSEL==='all'?' selected':'')+'>Consolidado (grupo)</option>'+
+    codes.map(function(c){return '<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>';}).join('');
+  function cardCv(t,id,h){return '<div class="sect">'+t+'</div><div class="card"><canvas id="'+id+'" height="'+(h||200)+'"></canvas></div>';}
+  return '<h1>BI — visão gráfica</h1>'+
+    '<select onchange="gsel(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:13px;margin-bottom:6px;">'+opts+'</select>'+
+    '<div class="note" style="text-align:left;margin-bottom:4px">Todos os gráficos usam o período completo importado. Valores em R$ milhões.</div>'+
+    cardCv('A operação está gerando caixa? (resultado operacional por mês)','bi1',190)+
+    cardCv('Para onde vai o dinheiro (atividades por mês)','bi2',200)+
+    cardCv('Obras: quem gera e quem consome (top 8)','bi3',230)+
+    cardCv('De quem mais entra dinheiro (top 8)','bi4',220)+
+    cardCv('Para quem mais sai dinheiro (top 8)','bi5',220)+
+    (GSEL==='all'?cardCv('Empresas por resultado operacional','bi6',300):'');
+}
+function _biDestroy(){GBICH.forEach(function(c){try{c.destroy();}catch(e){}});GBICH=[];}
+function _mkeys(){const set={};(GDATA||[]).forEach(function(r){set[r.data.slice(0,7)]=1;});return Object.keys(set).sort();}
+function _mlabel(k){const p=k.split('-');return p[1]+'/'+p[0].slice(2);}
+function _short(t,n){t=(''+t);return t.length>n?t.slice(0,n)+'…':t;}
+function drawBI(){
+  _biDestroy();
+  if(!GDATA||!GDATA.length)return;
+  const mk=_mkeys();
+  const inScope=function(r){return GSEL==='all'||r.cod===GSEL;};
+  // bi1: op net per month
+  const opm={};mk.forEach(function(k){opm[k]=0;});
+  GDATA.forEach(function(r){if(!inScope(r)||r.at!=='op')return;opm[r.data.slice(0,7)]+=r.rec-r.desp;});
+  const c1=document.getElementById('bi1');
+  if(c1){GBICH.push(new Chart(c1,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[{data:mk.map(function(k){return opm[k]/1e6;}),backgroundColor:mk.map(function(k){return opm[k]>=0?'#1D9E75':'#E24B4A';})}]},options:{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
+  // bi2: activities per month (nets)
+  const act={op:{},inv:{},fin:{}};mk.forEach(function(k){act.op[k]=0;act.inv[k]=0;act.fin[k]=0;});
+  GDATA.forEach(function(r){if(!inScope(r))return;const k=r.data.slice(0,7);
+    if(r.at==='op')act.op[k]+=r.rec-r.desp;
+    else if(r.at==='inv')act.inv[k]+=r.rec-r.desp;
+    else if(r.at==='fin')act.fin[k]+=r.rec-r.desp;
+    else if(r.at==='ic'&&GSEL!=='all'){act.fin[k]+=r.rec;act.inv[k]-=r.desp;}});
+  const c2=document.getElementById('bi2');
+  if(c2){GBICH.push(new Chart(c2,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[
+    {label:'Operacional',data:mk.map(function(k){return act.op[k]/1e6;}),backgroundColor:'#1D9E75'},
+    {label:'Investimento',data:mk.map(function(k){return act.inv[k]/1e6;}),backgroundColor:'#378ADD'},
+    {label:'Financiamento',data:mk.map(function(k){return act.fin[k]/1e6;}),backgroundColor:'#EF9F27'}]},
+    options:{plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
+  // bi3: obras top8 net (horizontal)
+  const obras=gOpAgg(gObraKey,null).slice(0,8);
+  const c3=document.getElementById('bi3');
+  if(c3){GBICH.push(new Chart(c3,{type:'bar',data:{labels:obras.map(function(o){return _short(o.k,24);}),datasets:[{data:obras.map(function(o){return (o.rec-o.desp)/1e6;}),backgroundColor:obras.map(function(o){return o.rec-o.desp>=0?'#1D9E75':'#E24B4A';})}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  // bi4/bi5: contrapartes
+  const all=gOpAgg(gCptKey,null);
+  const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,8);
+  const sai=all.filter(function(x){return x.desp>0;}).sort(function(a,b){return b.desp-a.desp;}).slice(0,8);
+  const c4=document.getElementById('bi4');
+  if(c4){GBICH.push(new Chart(c4,{type:'bar',data:{labels:ent.map(function(o){return _short(o.k,24);}),datasets:[{data:ent.map(function(o){return o.rec/1e6;}),backgroundColor:'#1D9E75'}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  const c5=document.getElementById('bi5');
+  if(c5){GBICH.push(new Chart(c5,{type:'bar',data:{labels:sai.map(function(o){return _short(o.k,24);}),datasets:[{data:sai.map(function(o){return o.desp/1e6;}),backgroundColor:'#E24B4A'}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
+  // bi6: empresas por resultado operacional (consolidado)
+  const c6=document.getElementById('bi6');
+  if(c6&&GSEL==='all'){
+    const list=Object.keys(GMET).map(function(c){return {c:c,v:GMET[c].recNeg-GMET[c].despNeg};}).sort(function(a,b){return b.v-a.v;});
+    GBICH.push(new Chart(c6,{type:'bar',data:{labels:list.map(function(x){return x.c+' '+_short((GEMP[x.c]||{}).emp||'',16);}),datasets:[{data:list.map(function(x){return x.v/1e6;}),backgroundColor:list.map(function(x){return x.v>=0?'#1D9E75':'#E24B4A';})}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:9}}},y:{ticks:{font:{size:9}}}}}}));
+  }
+}
+/* ============== FIM ABA BI ============== */
 
 boot();
 </script>
