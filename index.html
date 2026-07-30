@@ -318,7 +318,7 @@ function render(){
   else if(TAB==='liquidez')m.innerHTML=liquidez(p);
   else if(TAB==='divida')m.innerHTML=divida(p);
   else if(TAB==='grupo'){if(GDATA)computeMet(gWin());m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
-  else if(TAB==='bi'){if(GDATA)computeMet(null);m.innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();}
+  else if(TAB==='bi'){if(GDATA)computeMet(gWin());m.innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();}
   else m.innerHTML=historico();
   if(TAB==='historico')drawChart();
 }
@@ -326,7 +326,7 @@ function renderEmpty(){
   document.getElementById('posSel').innerHTML='<option>—</option>';
   document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
   if(TAB==='grupo'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
-  if(TAB==='bi'){if(GDATA)computeMet(null);document.getElementById('main').innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();return;}
+  if(TAB==='bi'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();return;}
   document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.'  :'<br>Aguarde o gerente alimentar.')+'</div>';
 }
 
@@ -1175,13 +1175,19 @@ function biView(){
   function cardCv(t,id,h){return '<div class="sect">'+t+'</div><div class="card"><canvas id="'+id+'" height="'+(h||200)+'"></canvas></div>';}
   return '<h1>BI — visão gráfica</h1>'+
     '<select onchange="gsel(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:13px;margin-bottom:6px;">'+opts+'</select>'+
-    '<div class="note" style="text-align:left;margin-bottom:4px">Valores em R$ milhões · período completo importado. <b>Toque nas barras</b> para ver os lançamentos; no gráfico de empresas, toque para filtrar o BI naquela empresa.</div>'+
+    (function(){const per=function(v,l){return '<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';};
+      return '<div class="toggle" style="margin-top:6px">'+per('dia','Dia')+per('semana','Semana')+per('mes','Mês')+per('ano','Ano')+per('tudo','Tudo')+'</div>'+
+      (GPER!=='tudo'?'<div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px;">'+
+        '<button onclick="gnav(-1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">◀</button>'+
+        '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
+        '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>':'');})()+
+    '<div class="note" style="text-align:left;margin-bottom:4px">Valores em R$ milhões. Os dois primeiros gráficos mostram a evolução completa; os rankings usam o período selecionado. <b>Toque nas barras</b> para ver os lançamentos; no gráfico de empresas, toque para filtrar o BI.</div>'+
     cardCv('A operação está gerando caixa? (resultado operacional por mês)','bi1',190)+
     cardCv('Para onde vai o dinheiro (atividades por mês)','bi2',200)+
-    cardCv('Obras: quem gera e quem consome (top 8)','bi3',230)+
-    cardCv('De quem mais entra dinheiro (top 8)','bi4',220)+
-    cardCv('Para quem mais sai dinheiro (top 8)','bi5',220)+
-    (GSEL==='all'?cardCv('Empresas por resultado operacional','bi6',300):'');
+    cardCv('Obras: quem gera e quem consome · '+gPerLabel(),'bi3',230)+
+    cardCv('De quem mais entra dinheiro · '+gPerLabel(),'bi4',220)+
+    cardCv('Para quem mais sai dinheiro · '+gPerLabel(),'bi5',220)+
+    (GSEL==='all'?cardCv('Empresas por resultado operacional · '+gPerLabel(),'bi6',300):'');
 }
 function _biDestroy(){GBICH.forEach(function(c){try{c.destroy();}catch(e){}});GBICH=[];}
 function _mkeys(){const set={};(GDATA||[]).forEach(function(r){set[r.data.slice(0,7)]=1;});return Object.keys(set).sort();}
@@ -1216,11 +1222,11 @@ function drawBI(){
       return r.at==='fin'||(r.at==='ic'&&GSEL!=='all'&&r.rec>0);});
     gdrillShow(nome+' '+_mlabel(k),rows.length+' lançamentos',rows);},plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
   // bi3: obras top8 net (horizontal)
-  const obras=gOpAgg(gObraKey,null).slice(0,8);
+  const obras=gOpAgg(gObraKey).slice(0,8);
   const c3=document.getElementById('bi3');
   if(c3){GBICH.push(new Chart(c3,{type:'bar',data:{labels:obras.map(function(o){return _short(o.k,24);}),datasets:[{data:obras.map(function(o){return (o.rec-o.desp)/1e6;}),backgroundColor:obras.map(function(o){return o.rec-o.desp>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var o=obras[els[0].index];gdrillShow(o.k,o.rows.length+' lançamentos',o.rows);},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},y:{ticks:{font:{size:10}}}}}}));}
   // bi4/bi5: contrapartes
-  const all=gOpAgg(gCptKey,null);
+  const all=gOpAgg(gCptKey);
   const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,8);
   const sai=all.filter(function(x){return x.desp>0;}).sort(function(a,b){return b.desp-a.desp;}).slice(0,8);
   const c4=document.getElementById('bi4');
