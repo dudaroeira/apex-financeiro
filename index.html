@@ -839,7 +839,7 @@ function grupoView(){
     if(!nAl&&!fA4.length)alerts+='<div class="line"><span>Nenhuma pendência'+escopo+'.</span></div>';
     fA1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
     fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
-    if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes p/ empresas do grupo fora dos 23 arquivos (JAX/JR6/R26/SQNW/Aria)</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
+    if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes a coligadas de outro grupo (JAX/JR6/R26/SQNW/Aria) — contam como Investimento</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
     alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
   }
   return '<h1>Grupo Apex</h1>'+
