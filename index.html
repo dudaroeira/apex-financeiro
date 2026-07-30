@@ -687,13 +687,22 @@ async function loadGrupo(){
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
-      const {data,error}=await sb.from('lancamentos').select('cod,data,hist,nominal,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
+      const {data,error}=await sb.from('lancamentos').select('cod,data,tipo,hist,nominal,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
       if(error)break;
       all=all.concat(data||[]);
       if(!data||data.length<1000)break;
       from+=1000;
     }
     all.forEach(r=>{r.desp=+r.desp;r.rec=+r.rec;r.cl=classLanc(r);});
+    (function(){
+      var idx={};
+      function elig(r){if(r.cl!=='n')return false;var t=normU((r.hist||'')+' '+(r.nominal||''));
+        return normU(r.tipo||'').indexOf('TRANSFER')>=0 || t.replace(/N\/A|NAO PERSONALIZADO|\s/g,'')==='';}
+      all.forEach(function(r,i){if(!elig(r))return;var side=r.desp>0?'d':'r';var val=(r.desp>0?r.desp:r.rec).toFixed(2);
+        var k=r.cod+'|'+r.data+'|'+val+'|'+side;(idx[k]=idx[k]||[]).push(i);});
+      for(var k in idx){if(k.slice(-1)!=='d')continue;var kr=k.slice(0,-1)+'r';var ds=idx[k],rs=idx[kr]||[];
+        var n=Math.min(ds.length,rs.length);for(var j=0;j<n;j++){all[ds[j]].cl='ti';all[rs[j]].cl='ti';}}
+    })();
     GDATA=all;computeElim();computeMet();
   }catch(e){GDATA=[];}
   GBUSY=false;
@@ -727,6 +736,7 @@ function computeMet(win){
     var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
     if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;m.b.finG[0]+=r.rec;m.b.invG[1]+=r.desp;return;}
     var at=r.cl==='soc'?'fin':(r.cl==='bk'?'inv':atOf(r));
+    if(at==='op'&&normU(r.tipo||'').indexOf('TRANSFER')>=0){at='inv';m.b.invA[0]+=0;}
     r.at=at;
     m.dfc[at][0]+=r.rec;m.dfc[at][1]+=r.desp;
     GDFC[at][0]+=r.rec;GDFC[at][1]+=r.desp;
