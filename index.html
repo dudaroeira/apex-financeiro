@@ -640,11 +640,12 @@ function computeElim(){
     if(r.cl==='soc')return;
     const val=(r.desp>0?r.desp:r.rec).toFixed(2);
     if(r.cl==='ig'){
-      GELIM.add(i);
       const oppSide=r.desp>0?'r':'d';
       const opp=(anyIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
       if(!opp){const t=normU((r.hist||'')+' '+(r.nominal||''));
-        if(/JAX|JR6|\bR26\b|SQNW|ARIA/.test(t))GAL.a4.push(r);else GAL.a2.push(r);}
+        if(/JAX|JR6|\bR26\b|SQNW|ARIA/.test(t)){r.jx=true;GAL.a4.push(r);return;}
+        GAL.a2.push(r);}
+      GELIM.add(i);
       return;
     }
     if(r.cl==='n'){
@@ -697,8 +698,9 @@ function computeMet(win){
   if(!GDATA)return;
   GDATA.forEach(function(r,i){
     if(win&&r.at!==undefined&&!win(r)){return;}
-    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
+    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
     if(r.cl==='ti'){r.at='ti';return;}
+    if(r.cl==='ig'&&r.jx){r.at='inv';m.b.invE[0]+=r.rec;m.b.invE[1]+=r.desp;m.dfc.inv[0]+=r.rec;m.dfc.inv[1]+=r.desp;GDFC.inv[0]+=r.rec;GDFC.inv[1]+=r.desp;return;}
     var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
     if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;m.b.finG[0]+=r.rec;m.b.invG[1]+=r.desp;return;}
     var at=r.cl==='soc'?'fin':(r.cl==='bk'?'inv':atOf(r));
@@ -753,11 +755,12 @@ function extratoCard(B,titulo,opts){
   function _fl(nome,v,neg){if(Math.abs(v)<0.005)return '';var shown=neg?-v:v;return '<div class="line"><span style="padding-left:12px;color:var(--mut)">'+nome+'</span><span class="v '+_cls(shown)+'">'+_sig(shown)+'</span></div>';}
   function _sub(nome,v){return '<div class="line" style="background:#F4F6F9;margin:0 -16px;padding:9px 16px"><span><b>'+nome+'</b></span><span class="'+_cls(v)+'" style="font-weight:700">'+_sig(v)+'</span></div>';}
   const vop=B.op[0]-B.op[1];
-  const vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1]);
+  B.invE=B.invE||[0,0];
+  const vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1])+(B.invE[0]-B.invE[1]);
   const vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
   const vtot=vop+vinv+vfin;
   let frase='Em '+gPerLabel()+', a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
-  if(Math.abs(vinv)>0.005)frase+=(vinv<0?'Foram direcionados '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (inclui aportes ao grupo)':'')+'. ':'Resgates e retornos de investimentos trouxeram '+BRL(vinv)+'. ');
+  if(Math.abs(vinv)>0.005)frase+=(vinv<0?'Foram direcionados '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (inclui aportes ao grupo)':(B.invE[1]>0.005?' (inclui aportes a coligadas)':''))+'. ':'Resgates e retornos de investimentos trouxeram '+BRL(vinv)+'. ');
   if(Math.abs(vfin)>0.005)frase+=(vfin>=0?'Captação líquida de '+BRL(vfin)+' em financiamento'+((B.finS[0]-B.finS[1])>0.005?' (principalmente sócios)':'')+'. ':'Devolução líquida de '+BRL(Math.abs(vfin))+' em financiamento (dívida/distribuições). ');
   frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+'.';
   return '<div class="sect">'+titulo+'</div>'+
@@ -769,6 +772,8 @@ function extratoCard(B,titulo,opts){
     _sub('Sobrou da operação',vop)+
     '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">2. INVESTIMENTOS</span><span></span></div>'+
     _fl('Aportes/mútuos enviados ao grupo',B.invG[1],true)+
+    _fl('Aportes a coligadas (outros grupos, ex.: JAX)',B.invE[1],true)+
+    _fl('Retornos de coligadas',B.invE[0])+
     _fl('Aplicações financeiras (saídas)',B.invA[1],true)+
     _fl('Resgates e rendimentos',B.invA[0])+
     _sub('Resultado de investimentos',vinv)+
@@ -798,8 +803,8 @@ function grupoView(){
     :'Gráfico: atividade operacional da empresa por período. As demais atividades estão no Resumo do caixa.';
   let rank='',ext='';
   if(GSEL==='all'){
-    const B0={op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
-    for(var c0 in GMET){var b0=GMET[c0].b||{};['op','invA','finS','finD'].forEach(function(k){if(b0[k]){B0[k][0]+=b0[k][0];B0[k][1]+=b0[k][1];}});}
+    const B0={op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
+    for(var c0 in GMET){var b0=GMET[c0].b||{};['op','invA','invE','finS','finD'].forEach(function(k){if(b0[k]){B0[k][0]+=b0[k][0];B0[k][1]+=b0[k][1];}});}
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
     ext=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true});
     rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
@@ -818,7 +823,7 @@ function grupoView(){
       '<div class="note" style="text-align:left">Operacional = atividade própria (clientes, fornecedores, folha, impostos). Investimento inclui aportes enviados ao grupo e aplicações. Financiamento inclui aportes recebidos, sócios e empréstimos.</div>';
   } else {
     const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:null};
-    const Bc=m.b||{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
+    const Bc=m.b||{op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
     const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
     ext=extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});rank='';
   }
@@ -835,7 +840,7 @@ function grupoView(){
     fA1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
     fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+((x.hist||x.nominal||'').slice(0,48))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
     if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes p/ empresas do grupo fora dos 23 arquivos (JAX/JR6/R26/SQNW/Aria)</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
-    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: esperados, sem espelho porque a destinatária não está entre os arquivos importados.</div>';
+    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
   }
   return '<h1>Grupo Apex</h1>'+
     '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
