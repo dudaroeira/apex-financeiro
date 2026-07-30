@@ -217,6 +217,13 @@ canvas{max-width:100%;}
   <div class="btns"><button class="btn-s" onclick="closeMenu()">Fechar</button></div>
 </div></div>
 
+<div class="modal" id="gdrillM"><div class="sheet">
+  <h2 id="gdTitle">Lançamentos</h2>
+  <p class="hint" id="gdSub"></p>
+  <div id="gdList" style="max-height:56vh;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;"></div>
+  <div class="btns"><button class="btn-s" onclick="gdrillClose()">Fechar</button></div>
+</div></div>
+
 <script>
 /* ====================== CONFIGURAÇÃO ======================
    Preencha os 3 valores abaixo seguindo o guia de configuração.
@@ -803,8 +810,7 @@ function grupoView(){
     :'Gráfico: atividade operacional da empresa por período. As demais atividades estão no Resumo do caixa.';
   let rank='',ext='';
   if(GSEL==='all'){
-    const B0={op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
-    for(var c0 in GMET){var b0=GMET[c0].b||{};['op','invA','invE','finS','finD'].forEach(function(k){if(b0[k]){B0[k][0]+=b0[k][0];B0[k][1]+=b0[k][1];}});}
+    const B0=buildB0();
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
     ext=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true});
     rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
@@ -865,6 +871,7 @@ function grupoView(){
     (GSEL==='all'?(function(){var rs=0,ds=0;for(var c in GMET){rs+=GMET[c].recS||0;ds+=GMET[c].despS||0;}return '<div class="card"><div class="line"><span>Recebido de sócios (PF)</span><span class="v up">'+BRL(rs)+'</span></div><div class="line"><span>Pago a sócios (distribuições)</span><span class="v down">'+BRL(ds)+'</span></div><div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((rs-ds)>=0?'up':'down')+'" style="font-weight:600">'+((rs-ds)>=0?'+':'−')+' '+BRL(Math.abs(rs-ds))+'</span></div></div>';})():'')+
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
+    biComparativo()+biObras()+biCpt()+pdfButtons()+
     rank+alerts+
     '<div class="note" id="gimpNote"></div>';
 }
@@ -966,6 +973,191 @@ async function onGrupoFiles(ev){
   GDATA=null;loadGrupo();
 }
 /* ==================== FIM ÁREA GRUPO ==================== */
+
+/* ============== BI AVANÇADO + RELATÓRIOS PDF DO GRUPO ============== */
+let GBIO=false,GBIC=false,GBICMP=false,GOBRA_LIST=[],GCPT_LIST=[];
+function gtoggle(name){if(name==='o')GBIO=!GBIO;if(name==='c')GBIC=!GBIC;if(name==='m')GBICMP=!GBICMP;render();}
+function buildB0(){
+  const B0={op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
+  for(var c in GMET){var b=GMET[c].b||{};['op','invA','invE','finS','finD'].forEach(function(k){if(b[k]){B0[k][0]+=b[k][0];B0[k][1]+=b[k][1];}});}
+  return B0;
+}
+function gScopeRows(win){
+  const w=win===undefined?gWin():win;const out=[];
+  (GDATA||[]).forEach(function(r,i){
+    if(w&&!w(r))return;
+    if(GSEL!=='all'&&r.cod!==GSEL)return;
+    out.push({r:r,i:i});
+  });
+  return out;
+}
+function gOpAgg(keyFn){
+  const map={};
+  gScopeRows().forEach(function(x){
+    if(x.r.at!=='op')return;
+    const k=keyFn(x.r)||'(não informado)';
+    if(!map[k])map[k]={k:k,rec:0,desp:0,rows:[]};
+    map[k].rec+=x.r.rec;map[k].desp+=x.r.desp;map[k].rows.push(x.r);
+  });
+  return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return (Math.abs(b.rec-b.desp)+0.000001*(b.rec+b.desp))-(Math.abs(a.rec-a.desp)+0.000001*(a.rec+a.desp));});
+}
+function gObraKey(r){var o=(r.obra||'').trim();if(!o||o==='N/A - N/A'||o==='N/A')return '(sem obra)';return o.length>34?o.slice(0,34)+'…':o;}
+function gCptKey(r){var n=(r.nominal||'').trim().toUpperCase();if(!n||n==='N/A'||n==='NAO PERSONALIZADO')return '(não identificado)';return n.length>34?n.slice(0,34)+'…':n;}
+function biObras(){
+  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'o\')">Obras / centros de custo (operacional) '+(GBIO?'▲':'▼')+'</div>';
+  if(!GBIO)return html;
+  GOBRA_LIST=gOpAgg(gObraKey).slice(0,15);
+  if(!GOBRA_LIST.length)return html+'<div class="card"><div class="line"><span>Sem dados no período.</span></div></div>';
+  html+='<div class="card" style="max-height:300px;overflow-y:auto">'+GOBRA_LIST.map(function(o,ix){
+    var net=o.rec-o.desp;
+    return '<div class="line" style="cursor:pointer" onclick="gdrillObra('+ix+')"><span style="font-size:12px">'+o.k+'<br><span style="color:var(--mut2)">E '+MM(o.rec)+' · S '+MM(o.desp)+' · '+o.rows.length+' lçtos</span></span><span class="'+(net>=0?'up':'down')+'" style="font-weight:600;font-size:12px">'+(net>=0?'+':'−')+MM(Math.abs(net)).replace('R$ ','')+'</span></div>';
+  }).join('')+'</div><div class="note" style="text-align:left">Toque numa obra para ver os lançamentos.</div>';
+  return html;
+}
+function biCpt(){
+  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'c\')">Top clientes e fornecedores (operacional) '+(GBIC?'▲':'▼')+'</div>';
+  if(!GBIC)return html;
+  const all=gOpAgg(gCptKey);
+  const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,8);
+  const sai=all.filter(function(x){return x.desp>0;}).sort(function(a,b){return b.desp-a.desp;}).slice(0,8);
+  GCPT_LIST=ent.concat(sai);
+  function bloc(t,arr,off,field){
+    return '<div class="sect" style="margin-top:8px;font-size:12px">'+t+'</div><div class="card">'+ (arr.length?arr.map(function(o,ix){
+      return '<div class="line" style="cursor:pointer" onclick="gdrillCpt('+(off+ix)+')"><span style="font-size:12px">'+o.k+'</span><span class="v" style="font-size:12px">'+BRL(o[field])+'</span></div>';
+    }).join(''):'<div class="line"><span>—</span></div>')+'</div>';
+  }
+  return html+bloc('De quem mais ENTRA dinheiro',ent,0,'rec')+bloc('Para quem mais SAI dinheiro',sai,ent.length,'desp');
+}
+function actNets(win){
+  const nets={op:0,inv:0,fin:0};
+  gScopeRows(win).forEach(function(x){
+    const r=x.r;
+    if(r.at==='op')nets.op+=r.rec-r.desp;
+    else if(r.at==='inv')nets.inv+=r.rec-r.desp;
+    else if(r.at==='fin')nets.fin+=r.rec-r.desp;
+    else if(r.at==='ic'&&GSEL!=='all'){nets.fin+=r.rec;nets.inv-=r.desp;}
+  });
+  return nets;
+}
+function biComparativo(){
+  if(GPER==='tudo')return '';
+  const b=gBuckets();const k=gCurKey();const ix=b.indexOf(k);
+  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'m\')">Comparativo com período anterior '+(GBICMP?'▲':'▼')+'</div>';
+  if(!GBICMP)return html;
+  if(ix<=0)return html+'<div class="card"><div class="line"><span>Não há período anterior para comparar.</span></div></div>';
+  const kPrev=b[ix-1];
+  const cur=actNets(function(r){return gbucket(r.data)===k;});
+  const prev=actNets(function(r){return gbucket(r.data)===kPrev;});
+  function ln(nome,c,p){
+    const d=c-p;const arrow=Math.abs(d)<0.005?'▬':(d>0?'▲':'▼');const cl=Math.abs(d)<0.005?'flat':(d>0?'up':'down');
+    return '<div class="line"><span>'+nome+'</span><span class="v" style="font-size:12px">'+( (c>=0?'+':'−')+MM(Math.abs(c)).replace('R$ ','') )+' <span class="'+cl+'">'+arrow+' '+MM(Math.abs(d)).replace('R$ ','')+'</span></span></div>';
+  }
+  const vc=cur.op+cur.inv+cur.fin, vp=prev.op+prev.inv+prev.fin;
+  return html+'<div class="card">'+
+    '<div class="line"><span style="color:var(--mut);font-size:12px">'+gPerLabel()+' vs período anterior</span><span></span></div>'+
+    ln('Operacional',cur.op,prev.op)+ln('Investimento',cur.inv,prev.inv)+ln('Financiamento',cur.fin,prev.fin)+ln('Variação do caixa',vc,vp)+
+    '</div>';
+}
+function gdrillShow(title,sub,rows){
+  document.getElementById('gdTitle').textContent=title;
+  document.getElementById('gdSub').textContent=sub;
+  const lim=rows.slice(0,250);
+  document.getElementById('gdList').innerHTML=lim.map(function(r){
+    const v=r.rec>0?r.rec:-r.desp;
+    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+((r.hist||r.nominal||'').slice(0,42))+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
+  }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
+  if(rows.length>250)document.getElementById('gdSub').textContent=sub+' · mostrando 250 de '+rows.length;
+  document.getElementById('gdrillM').classList.add('on');
+}
+function gdrillClose(){document.getElementById('gdrillM').classList.remove('on');}
+function gdrillObra(ix){const o=GOBRA_LIST[ix];if(o)gdrillShow(o.k,gPerLabel()+' · '+o.rows.length+' lançamentos',o.rows);}
+function gdrillCpt(ix){const o=GCPT_LIST[ix];if(o)gdrillShow(o.k,gPerLabel()+' · '+o.rows.length+' lançamentos',o.rows);}
+function pdfButtons(){
+  return '<div class="sect">Relatórios do grupo (PDF) · '+gPerLabel()+'</div>'+
+    '<div style="display:flex;gap:10px;margin-bottom:4px;">'+
+    '<button class="btn-s" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfGrupo(false)">Enxuto (1–2 pág.)</button>'+
+    '<button class="btn-p" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfGrupo(true)">Completo (diretoria)</button></div>';
+}
+function _ghdr(doc,title){
+  const W=doc.internal.pageSize.getWidth();
+  doc.setFillColor(31,56,100);doc.rect(0,0,W,72,'F');
+  doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(15);doc.text('Grupo Apex — '+title,40,32);
+  doc.setFont(undefined,'normal');doc.setFontSize(10);doc.text('Período: '+gPerLabel()+'   ·   23 empresas   ·   consolidado com eliminações intragrupo',40,52);
+  doc.setTextColor(0);
+}
+function pdfGrupo(completo){
+  if(!GDATA||!GDATA.length){alert('Sem dados do grupo.');return;}
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
+  const blue=[46,117,182],M=40,W=doc.internal.pageSize.getWidth(),CW=W-2*M;
+  const B=buildB0();B.invE=B.invE||[0,0];
+  const vop=B.op[0]-B.op[1],vinv=(B.invA[0]-B.invA[1])+(B.invE[0]-B.invE[1]),vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
+  const vtot=vop+vinv+vfin;
+  function money(v){return (v>=0?'+ ':'− ')+BRL(Math.abs(v)).replace('R$ ','');}
+  _ghdr(doc,completo?'Relatório Executivo':'Resumo do Caixa');
+  const body=[
+    ['1. OPERAÇÃO','',''],
+    ['Recebeu de clientes/obras',BRL(B.op[0]),''],['Pagou fornecedores, folha, impostos','− '+BRL(B.op[1]),''],
+    ['Sobrou da operação','',money(vop)],
+    ['2. INVESTIMENTOS','',''],
+    ['Aportes a coligadas (JAX/outros grupos)','− '+BRL(B.invE[1]),''],['Aplicações financeiras (saídas)','− '+BRL(B.invA[1]),''],['Resgates e rendimentos',BRL(B.invA[0]),''],
+    ['Resultado de investimentos','',money(vinv)],
+    ['3. FINANCIAMENTO','',''],
+    ['Aportes recebidos dos sócios',BRL(B.finS[0]),''],['Distribuições pagas aos sócios','− '+BRL(B.finS[1]),''],['Empréstimos: amortização/juros','− '+BRL(B.finD[1]),''],
+    ['Resultado de financiamento','',money(vfin)],
+    ['VARIAÇÃO DO CAIXA NO PERÍODO','',money(vtot)]];
+  doc.autoTable({startY:90,body:body,theme:'grid',styles:{fontSize:9,cellPadding:4},
+    columnStyles:{0:{cellWidth:280},1:{halign:'right',cellWidth:120},2:{halign:'right',fontStyle:'bold'}},margin:{left:M,right:M},
+    didParseCell:function(d){var t=''+d.row.raw[0];
+      if(/^\d\./.test(t)){d.cell.styles.fillColor=[31,56,100];d.cell.styles.textColor=[255,255,255];d.cell.styles.fontStyle='bold';}
+      if(/^(Sobrou|Resultado)/.test(t)){d.cell.styles.fillColor=[238,242,248];d.cell.styles.fontStyle='bold';}
+      if(/^VARIAÇÃO/.test(t)){d.cell.styles.fillColor=vtot>=0?[225,245,238]:[251,233,233];d.cell.styles.fontStyle='bold';}}});
+  let y=doc.lastAutoTable.finalY+14;
+  const frase='Em '+gPerLabel()+', a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. '+
+    (Math.abs(vinv)>0.005?(vinv<0?'Investimentos consumiram '+BRL(Math.abs(vinv))+'. ':'Investimentos devolveram '+BRL(vinv)+'. '):'')+
+    (Math.abs(vfin)>0.005?(vfin>=0?'Captação líquida de '+BRL(vfin)+' em financiamento. ':'Devolução líquida de '+BRL(Math.abs(vfin))+' em financiamento. '):'')+
+    'O caixa do grupo '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+'.';
+  doc.setFontSize(9.5);doc.setFont(undefined,'normal');
+  doc.text(doc.splitTextToSize('Em resumo: '+frase,CW),M,y);y+=34;
+  const list=Object.keys(GMET).map(function(c){var m=GMET[c];var b=m.b||{};var vi=(b.invA?b.invA[0]-b.invA[1]:0)+(b.invE?b.invE[0]-b.invE[1]:0)+(b.invG?b.invG[0]-b.invG[1]:0);var vf=(b.finG?b.finG[0]-b.finG[1]:0)+(b.finS?b.finS[0]-b.finS[1]:0)+(b.finD?b.finD[0]-b.finD[1]:0);
+    return {c:c,e:((GEMP[c]||{}).emp||'').slice(0,34),op:m.recNeg-m.despNeg,vi:vi,vf:vf,tot:(m.recNeg-m.despNeg)+vi+vf};}).sort(function(a,b){return b.op-a.op;});
+  doc.autoTable({startY:y,head:[['Empresa','Operacional','Investimento','Financiamento','Variação caixa']],
+    body:list.map(function(x){return [x.c+' - '+x.e,money(x.op),money(x.vi),money(x.vf),money(x.tot)];}),
+    theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8.5},styles:{fontSize:7.5,cellPadding:3},
+    columnStyles:{0:{cellWidth:170},1:{halign:'right'},2:{halign:'right'},3:{halign:'right'},4:{halign:'right',fontStyle:'bold'}},margin:{left:M,right:M}});
+  if(completo){
+    doc.addPage();_ghdr(doc,'Evolução e BI');
+    try{
+      const agg={};(GDATA||[]).forEach(function(r){if(r.at!=='op')return;const bk=gbucket(r.data);if(!agg[bk])agg[bk]=[0,0];agg[bk][0]+=r.rec;agg[bk][1]+=r.desp;});
+      const keys=Object.keys(agg).sort().slice(-24);
+      const img=_chartImg({type:'bar',data:{labels:keys.map(gblabel),datasets:[
+        {label:'Entradas op.',data:keys.map(function(k){return agg[k][0]/1e6;}),backgroundColor:'#1D9E75'},
+        {label:'Saídas op.',data:keys.map(function(k){return agg[k][1]/1e6;}),backgroundColor:'#E24B4A'}]},
+        options:{plugins:{legend:{position:'bottom',labels:{font:{size:9}}},title:{display:true,text:'Fluxo operacional do grupo (R$ MM)',font:{size:11}}},scales:{y:{ticks:{font:{size:8}}},x:{ticks:{font:{size:8}}}}}},Math.round(CW*2),300);
+      doc.addImage(img,'PNG',M,86,CW,150);
+    }catch(e){}
+    let y2=250;
+    const obras=gOpAgg(gObraKey).slice(0,10);
+    doc.autoTable({startY:y2,head:[['Obra / centro de custo (top 10)','Entradas','Saídas','Líquido']],
+      body:obras.map(function(o){return [o.k,BRL(o.rec),BRL(o.desp),money(o.rec-o.desp)];}),
+      theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8.5},styles:{fontSize:7.5,cellPadding:3},
+      columnStyles:{0:{cellWidth:200},1:{halign:'right'},2:{halign:'right'},3:{halign:'right',fontStyle:'bold'}},margin:{left:M,right:M}});
+    y2=doc.lastAutoTable.finalY+12;
+    const all=gOpAgg(gCptKey);
+    const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,6);
+    const sai=all.filter(function(x){return x.desp>0;}).sort(function(a,b){return b.desp-a.desp;}).slice(0,6);
+    doc.autoTable({startY:y2,head:[['Top entradas (clientes)','Valor','Top saídas (fornecedores)','Valor']],
+      body:Array.from({length:6}).map(function(_,i){return [ent[i]?ent[i].k:'',ent[i]?BRL(ent[i].rec):'',sai[i]?sai[i].k:'',sai[i]?BRL(sai[i].desp):''];}),
+      theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8.5},styles:{fontSize:7.5,cellPadding:3},
+      columnStyles:{0:{cellWidth:160},1:{halign:'right',cellWidth:80},2:{cellWidth:160},3:{halign:'right'}},margin:{left:M,right:M}});
+    y2=doc.lastAutoTable.finalY+14;
+    const nA=GAL.a1.length+GAL.a2.length;
+    doc.setFontSize(9.5);
+    doc.text(doc.splitTextToSize('Consistência: '+nA+' pendência(s) — '+GAL.a1.length+' de transferência entre contas (regra 1) e '+GAL.a2.length+' de espelhamento entre empresas (regra 2). Aportes a coligadas (JAX e outros): '+GAL.a4.length+' lançamentos, classificados como Investimento. Detalhes no app, aba Grupo → Consistência.',CW),M,y2);
+  }
+  _ftr(doc);
+  _output(doc,'Apex_Grupo_'+(completo?'Completo_':'Resumo_')+gPerLabel().replace(/[\/ ]/g,'-')+'.pdf');
+}
+/* ============== FIM BI + PDF GRUPO ============== */
 
 boot();
 </script>
