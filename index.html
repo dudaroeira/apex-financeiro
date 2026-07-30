@@ -668,7 +668,7 @@ function computeElim(){
       const oppSide=r.desp>0?'r':'d';
       const opp=(anyIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
       if(!opp){const t=normU((r.hist||'')+' '+(r.nominal||''));
-        if(/JAX|JR6|\bR26\b|SQNW|ARIA/.test(t)){r.jx=true;GAL.a4.push(r);return;}
+        if(/JAX|JR6|\bR26\b|SQNW|ARIA *& *DX|\bREALTY\b|APEX IMOBILI/.test(t)){r.jx=true;GAL.a4.push(r);return;}
         GAL.a2.push(r);}
       GELIM.add(i);
       return;
