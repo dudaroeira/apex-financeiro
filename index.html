@@ -871,7 +871,7 @@ function grupoView(){
     (GSEL==='all'?(function(){var rs=0,ds=0;for(var c in GMET){rs+=GMET[c].recS||0;ds+=GMET[c].despS||0;}return '<div class="card"><div class="line"><span>Recebido de sócios (PF)</span><span class="v up">'+BRL(rs)+'</span></div><div class="line"><span>Pago a sócios (distribuições)</span><span class="v down">'+BRL(ds)+'</span></div><div class="line"><span><b>Fluxo líquido com sócios</b></span><span class="'+((rs-ds)>=0?'up':'down')+'" style="font-weight:600">'+((rs-ds)>=0?'+':'−')+' '+BRL(Math.abs(rs-ds))+'</span></div></div>';})():'')+
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
-    biComparativo()+biObras()+biCpt()+pdfButtons()+
+    '<div class="sect">Análises (BI)</div>'+biComparativo()+biObras()+biCpt()+pdfButtons()+
     rank+alerts+
     '<div class="note" id="gimpNote"></div>';
 }
@@ -1004,7 +1004,7 @@ function gOpAgg(keyFn){
 function gObraKey(r){var o=(r.obra||'').trim();if(!o||o==='N/A - N/A'||o==='N/A')return '(sem obra)';return o.length>34?o.slice(0,34)+'…':o;}
 function gCptKey(r){var n=(r.nominal||'').trim().toUpperCase();if(!n||n==='N/A'||n==='NAO PERSONALIZADO')return '(não identificado)';return n.length>34?n.slice(0,34)+'…':n;}
 function biObras(){
-  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'o\')">Obras / centros de custo (operacional) '+(GBIO?'▲':'▼')+'</div>';
+  let html='<button class="bigbtn" onclick="gtoggle(\'o\')" style="margin-top:10px"><span class="ic">&#127959;</span><span><b>Obras / centros de custo</b><small>Toque para '+(GBIO?'recolher':'abrir')+'</small></span><span style="margin-left:auto;color:var(--mut)">'+(GBIO?'▲':'▼')+'</span></button>';
   if(!GBIO)return html;
   GOBRA_LIST=gOpAgg(gObraKey).slice(0,15);
   if(!GOBRA_LIST.length)return html+'<div class="card"><div class="line"><span>Sem dados no período.</span></div></div>';
@@ -1015,7 +1015,7 @@ function biObras(){
   return html;
 }
 function biCpt(){
-  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'c\')">Top clientes e fornecedores (operacional) '+(GBIC?'▲':'▼')+'</div>';
+  let html='<button class="bigbtn" onclick="gtoggle(\'c\')" style="margin-top:10px"><span class="ic">&#128101;</span><span><b>Top clientes e fornecedores</b><small>Toque para '+(GBIC?'recolher':'abrir')+'</small></span><span style="margin-left:auto;color:var(--mut)">'+(GBIC?'▲':'▼')+'</span></button>';
   if(!GBIC)return html;
   const all=gOpAgg(gCptKey);
   const ent=all.filter(function(x){return x.rec>0;}).sort(function(a,b){return b.rec-a.rec;}).slice(0,8);
@@ -1042,7 +1042,7 @@ function actNets(win){
 function biComparativo(){
   if(GPER==='tudo')return '';
   const b=gBuckets();const k=gCurKey();const ix=b.indexOf(k);
-  let html='<div class="sect" style="cursor:pointer" onclick="gtoggle(\'m\')">Comparativo com período anterior '+(GBICMP?'▲':'▼')+'</div>';
+  let html='<button class="bigbtn" onclick="gtoggle(\'m\')" style="margin-top:10px"><span class="ic">&#8646;</span><span><b>Comparativo com período anterior</b><small>Toque para '+(GBICMP?'recolher':'abrir')+'</small></span><span style="margin-left:auto;color:var(--mut)">'+(GBICMP?'▲':'▼')+'</span></button>';
   if(!GBICMP)return html;
   if(ix<=0)return html+'<div class="card"><div class="line"><span>Não há período anterior para comparar.</span></div></div>';
   const kPrev=b[ix-1];
