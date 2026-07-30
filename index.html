@@ -746,6 +746,44 @@ function grupoRowsChart(){
   return out;
 }
 
+function extratoCard(B,titulo,opts){
+  opts=opts||{};
+  function _sig(v){return (v>=0?'+ ':'− ')+BRL(Math.abs(v));}
+  function _cls(v){return v>=0?'up':'down';}
+  function _fl(nome,v,neg){if(Math.abs(v)<0.005)return '';var shown=neg?-v:v;return '<div class="line"><span style="padding-left:12px;color:var(--mut)">'+nome+'</span><span class="v '+_cls(shown)+'">'+_sig(shown)+'</span></div>';}
+  function _sub(nome,v){return '<div class="line" style="background:#F4F6F9;margin:0 -16px;padding:9px 16px"><span><b>'+nome+'</b></span><span class="'+_cls(v)+'" style="font-weight:700">'+_sig(v)+'</span></div>';}
+  const vop=B.op[0]-B.op[1];
+  const vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1]);
+  const vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
+  const vtot=vop+vinv+vfin;
+  let frase='Em '+gPerLabel()+', a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
+  if(Math.abs(vinv)>0.005)frase+=(vinv<0?'Foram direcionados '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (inclui aportes ao grupo)':'')+'. ':'Resgates e retornos de investimentos trouxeram '+BRL(vinv)+'. ');
+  if(Math.abs(vfin)>0.005)frase+=(vfin>=0?'Captação líquida de '+BRL(vfin)+' em financiamento'+((B.finS[0]-B.finS[1])>0.005?' (principalmente sócios)':'')+'. ':'Devolução líquida de '+BRL(Math.abs(vfin))+' em financiamento (dívida/distribuições). ');
+  frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+'.';
+  return '<div class="sect">'+titulo+'</div>'+
+    '<div class="card">'+
+    (opts.badge?'<div class="line"><span>Situação</span><span>'+opts.badge+'</span></div>':'')+
+    '<div class="line" style="border-bottom:none;padding-bottom:2px"><span style="font-weight:600;color:var(--mut)">1. OPERAÇÃO (o negócio no dia a dia)</span><span></span></div>'+
+    _fl('Recebeu de clientes/obras',B.op[0])+
+    _fl('Pagou fornecedores, folha, impostos',B.op[1],true)+
+    _sub('Sobrou da operação',vop)+
+    '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">2. INVESTIMENTOS</span><span></span></div>'+
+    _fl('Aportes/mútuos enviados ao grupo',B.invG[1],true)+
+    _fl('Aplicações financeiras (saídas)',B.invA[1],true)+
+    _fl('Resgates e rendimentos',B.invA[0])+
+    _sub('Resultado de investimentos',vinv)+
+    '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">3. FINANCIAMENTO (como se capitalizou)</span><span></span></div>'+
+    _fl('Aportes/mútuos recebidos do grupo',B.finG[0])+
+    _fl('Aportes recebidos dos sócios',B.finS[0])+
+    _fl('Distribuições pagas aos sócios',B.finS[1],true)+
+    _fl('Empréstimos: captado',B.finD[0])+
+    _fl('Empréstimos: amortização/juros',B.finD[1],true)+
+    _sub('Resultado de financiamento',vfin)+
+    '<div class="line" style="margin-top:8px;background:'+(vtot>=0?'#E1F5EE':'#FBE9E9')+';margin-left:-16px;margin-right:-16px;padding:11px 16px"><span style="font-weight:700">VARIAÇÃO DO CAIXA NO PERÍODO</span><span class="'+_cls(vtot)+'" style="font-weight:700;font-size:15px">'+_sig(vtot)+'</span></div>'+
+    '</div>'+
+    '<div class="card" style="background:#F8FAFD"><div style="font-size:12.5px;line-height:1.65;color:var(--txt)"><b>Em resumo:</b> '+frase+'</div></div>'+
+    (opts.elimNote?'<div class="note" style="text-align:left">Consolidado do grupo: fluxos entre as 23 empresas são eliminados; sócios e bancos são contrapartes externas.</div>':'');
+}
 function grupoView(){
   const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>':'';
   if(GDATA===null)return '<h1>Grupo Apex</h1><div class="empty">Carregando lançamentos…</div>';
@@ -761,8 +799,10 @@ function grupoView(){
     :'Gráfico e totais: atividade OPERACIONAL da empresa. Investimento, financiamento, grupo e sócios aparecem nos quadros DFC e Desempenho.';
   let rank='';
   if(GSEL==='all'){
+    const B0={op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
+    for(var c0 in GMET){var b0=GMET[c0].b||{};['op','invA','finS','finD'].forEach(function(k){if(b0[k]){B0[k][0]+=b0[k][0];B0[k][1]+=b0[k][1];}});}
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
-    rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
+    rank=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true})+'<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
       list.map(function(x){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'+
@@ -777,43 +817,10 @@ function grupoView(){
       }).join('')+'</div>'+
       '<div class="note" style="text-align:left">Operacional = atividade própria (clientes, fornecedores, folha, impostos). Investimento inclui aportes enviados ao grupo e aplicações. Financiamento inclui aportes recebidos, sócios e empréstimos.</div>';
   } else {
-    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
-    const B=m.b||{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
-    function _sig(v){return (v>=0?'+ ':'− ')+BRL(Math.abs(v));}
-    function _cls(v){return v>=0?'up':'down';}
-    function _fl(nome,v,neg){if(Math.abs(v)<0.005)return '';var shown=neg?-v:v;return '<div class="line"><span style="padding-left:12px;color:var(--mut)">'+nome+'</span><span class="v '+_cls(shown)+'">'+_sig(shown)+'</span></div>';}
-    function _sub(nome,v){return '<div class="line" style="background:#F4F6F9;margin:0 -16px;padding:9px 16px"><span><b>'+nome+'</b></span><span class="'+_cls(v)+'" style="font-weight:700">'+_sig(v)+'</span></div>';}
-    const vop=B.op[0]-B.op[1];
-    const vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1]);
-    const vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
-    const vtot=vop+vinv+vfin;
+    const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:null};
+    const Bc=m.b||{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
     const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
-    let frase='Em '+gPerLabel()+', a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
-    if(Math.abs(vinv)>0.005)frase+=(vinv<0?'A empresa direcionou '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (sobretudo aportes ao grupo)':'')+'. ':'Resgates/retornos de investimentos trouxeram '+BRL(vinv)+'. ');
-    if(Math.abs(vfin)>0.005)frase+=(vfin>=0?'Captou '+BRL(vfin)+' em financiamento'+((B.finS[0]-B.finS[1])>0.005?' (principalmente sócios)':'')+'. ':'Devolveu '+BRL(Math.abs(vfin))+' em financiamento (dívida/distribuições). ');
-    frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+'.';
-    rank='<div class="sect">Resumo do caixa — '+nomeEmp+' · '+gPerLabel()+'</div>'+
-      '<div class="card">'+
-      '<div class="line"><span>Situação</span><span>'+badge(m)+'</span></div>'+
-      '<div class="line" style="border-bottom:none;padding-bottom:2px"><span style="font-weight:600;color:var(--mut)">1. OPERAÇÃO (o negócio no dia a dia)</span><span></span></div>'+
-      _fl('Recebeu de clientes/obras',B.op[0])+
-      _fl('Pagou fornecedores, folha, impostos',B.op[1],true)+
-      _sub('Sobrou da operação',vop)+
-      '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">2. INVESTIMENTOS</span><span></span></div>'+
-      _fl('Aportes/mútuos enviados ao grupo',B.invG[1],true)+
-      _fl('Aplicações financeiras (saídas)',B.invA[1],true)+
-      _fl('Resgates e rendimentos',B.invA[0])+
-      _sub('Resultado de investimentos',vinv)+
-      '<div class="line" style="border-bottom:none;padding-bottom:2px;margin-top:6px"><span style="font-weight:600;color:var(--mut)">3. FINANCIAMENTO (como se capitalizou)</span><span></span></div>'+
-      _fl('Aportes/mútuos recebidos do grupo',B.finG[0])+
-      _fl('Aportes recebidos dos sócios',B.finS[0])+
-      _fl('Distribuições pagas aos sócios',B.finS[1],true)+
-      _fl('Empréstimos: captado',B.finD[0])+
-      _fl('Empréstimos: amortização/juros',B.finD[1],true)+
-      _sub('Resultado de financiamento',vfin)+
-      '<div class="line" style="margin-top:8px;background:'+(vtot>=0?'#E1F5EE':'#FBE9E9')+';margin-left:-16px;margin-right:-16px;padding:11px 16px"><span style="font-weight:700">VARIAÇÃO DO CAIXA NO PERÍODO</span><span class="'+_cls(vtot)+'" style="font-weight:700;font-size:15px">'+_sig(vtot)+'</span></div>'+
-      '</div>'+
-      '<div class="card" style="background:#F8FAFD"><div style="font-size:12.5px;line-height:1.65;color:var(--txt)"><b>Em resumo:</b> '+frase+'</div></div>';
+    rank=extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});
   }
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
   const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
