@@ -309,14 +309,14 @@ function render(){
   if(TAB==='painel')m.innerHTML=painel(p,pr);
   else if(TAB==='liquidez')m.innerHTML=liquidez(p);
   else if(TAB==='divida')m.innerHTML=divida(p);
-  else if(TAB==='grupo'){m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
+  else if(TAB==='grupo'){if(GDATA)computeMet(gWin());m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
   else m.innerHTML=historico();
   if(TAB==='historico')drawChart();
 }
 function renderEmpty(){
   document.getElementById('posSel').innerHTML='<option>—</option>';
   document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
-  if(TAB==='grupo'){document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
+  if(TAB==='grupo'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
   document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.'  :'<br>Aguarde o gerente alimentar.')+'</div>';
 }
 
@@ -596,7 +596,17 @@ let GLEG=false;
 function gtoggleLeg(){GLEG=!GLEG;render();}
 function normU(s){return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
 function gsel(v){GSEL=v;render();}
-function gper(v){GPER=v;render();}
+let GCUR=null;
+function gper(v){GPER=v;GCUR=null;render();}
+function gBuckets(){if(!GDATA)return [];const set={};GDATA.forEach(function(r){set[gbucket(r.data)]=1;});return Object.keys(set).sort();}
+function gCurKey(){if(GPER==='tudo')return null;const b=gBuckets();if(!b.length)return null;if(GCUR&&b.indexOf(GCUR)>=0)return GCUR;return b[b.length-1];}
+function gnav(d){const b=gBuckets();if(!b.length)return;let i=b.indexOf(gCurKey());i+=d;if(i<0||i>=b.length)return;GCUR=b[i];render();}
+function gWin(){if(GPER==='tudo')return null;const k=gCurKey();if(!k)return null;return function(r){return gbucket(r.data)===k;};}
+function gPerLabel(){if(GPER==='tudo')return 'todo o período';const k=gCurKey();if(!k)return '—';
+  if(GPER==='ano')return k;
+  if(GPER==='mes'){const p=k.split('-');return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+p[1]-1]+'/'+p[0];}
+  if(GPER==='semana')return 'semana de '+fromISO(k);
+  return fromISO(k);}
 function gtoggleAlerts(){GALERTS=!GALERTS;render();}
 function toISO(d){const p=d.split('/');return p[2]+'-'+p[1]+'-'+p[0];}
 function fromISO(d){const p=(''+d).slice(0,10).split('-');return p[2]+'/'+p[1]+'/'+p[0];}
@@ -667,10 +677,12 @@ async function loadGrupo(){
 }
 function gbucket(iso){
   if(GPER==='dia')return iso.slice(0,10);
+  if(GPER==='ano')return iso.slice(0,4);
   if(GPER==='semana'){const d=new Date(iso.slice(0,10)+'T12:00:00');const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10);}
   return iso.slice(0,7);
 }
 function gblabel(b){
+  if(GPER==='ano')return b;
   if(GPER==='mes'){const p=b.split('-');return p[1]+'/'+p[0];}
   if(GPER==='semana')return 'sem '+fromISO(b).slice(0,5);
   return fromISO(b).slice(0,5);
@@ -680,10 +692,11 @@ function atOf(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
   if(/AMORTIZA|EMPRESTIM|FINANCIAMENT|BNDES|CAPITAL DE GIRO|CONSORCIO/.test(t))return 'fin';
   if(/RENDIMENTO|\bCDB\b|\bLCI\b|IMOBILIZADO|CAPITALIZA/.test(t))return 'inv';
   return 'op';}
-function computeMet(){
+function computeMet(win){
   GMET={};GDFC={op:[0,0],inv:[0,0],fin:[0,0]};
   if(!GDATA)return;
   GDATA.forEach(function(r,i){
+    if(win&&r.at!==undefined&&!win(r)){return;}
     var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
     if(r.cl==='ti'){r.at='ti';return;}
     var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
@@ -715,6 +728,16 @@ function badge(m){
 }
 function grupoRows(){
   if(!GDATA)return [];
+  const win=gWin();const out=[];
+  GDATA.forEach(function(r,i){
+    if(win&&!win(r))return;
+    if(GSEL==='all'){if(r.at==='op')out.push(r);}
+    else if(r.cod===GSEL&&r.at==='op')out.push(r);
+  });
+  return out;
+}
+function grupoRowsChart(){
+  if(!GDATA)return [];
   const out=[];
   GDATA.forEach(function(r,i){
     if(GSEL==='all'){if(r.at==='op')out.push(r);}
@@ -739,7 +762,7 @@ function grupoView(){
   let rank='';
   if(GSEL==='all'){
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
-    rank='<div class="sect">Desempenho por empresa — operacional × investimento × financiamento</div><div class="card" style="max-height:340px;overflow-y:auto">'+
+    rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
       list.map(function(x){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'+
@@ -765,11 +788,11 @@ function grupoView(){
     const vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
     const vtot=vop+vinv+vfin;
     const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
-    let frase='No período, a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
+    let frase='Em '+gPerLabel()+', a operação '+(vop>=0?'gerou ':'consumiu ')+BRL(Math.abs(vop))+'. ';
     if(Math.abs(vinv)>0.005)frase+=(vinv<0?'A empresa direcionou '+BRL(Math.abs(vinv))+' a investimentos'+(B.invG[1]>0.005?' (sobretudo aportes ao grupo)':'')+'. ':'Resgates/retornos de investimentos trouxeram '+BRL(vinv)+'. ');
     if(Math.abs(vfin)>0.005)frase+=(vfin>=0?'Captou '+BRL(vfin)+' em financiamento'+((B.finS[0]-B.finS[1])>0.005?' (principalmente sócios)':'')+'. ':'Devolveu '+BRL(Math.abs(vfin))+' em financiamento (dívida/distribuições). ');
-    frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+' no período.';
-    rank='<div class="sect">Resumo do caixa — '+nomeEmp+'</div>'+
+    frase+='O caixa '+(vtot>=0?'aumentou ':'diminuiu ')+BRL(Math.abs(vtot))+'.';
+    rank='<div class="sect">Resumo do caixa — '+nomeEmp+' · '+gPerLabel()+'</div>'+
       '<div class="card">'+
       '<div class="line"><span>Situação</span><span>'+badge(m)+'</span></div>'+
       '<div class="line" style="border-bottom:none;padding-bottom:2px"><span style="font-weight:600;color:var(--mut)">1. OPERAÇÃO (o negócio no dia a dia)</span><span></span></div>'+
@@ -810,12 +833,17 @@ function grupoView(){
   return '<h1>Grupo Apex</h1>'+
     '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
     '<select onchange="gsel(this.value)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">'+opts+'</select>'+mgrBtn+'</div>'+
-    '<div class="toggle">'+per('mes','Mês')+per('semana','Semana')+per('dia','Dia')+'</div>'+
+    '<div class="toggle">'+per('dia','Dia')+per('semana','Semana')+per('mes','Mês')+per('ano','Ano')+per('tudo','Tudo')+'</div>'+
+    (GPER!=='tudo'?'<div style="display:flex;align-items:center;gap:8px;margin:-4px 0 12px;">'+
+      '<button onclick="gnav(-1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">◀</button>'+
+      '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
+      '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>'
+      :'<div class="note" style="margin:-4px 0 12px">Mostrando todo o período importado</div>')+
     '<div class="row2">'+
     '<div class="kpi"><div class="lbl">Entradas operacionais</div><div class="big sm up">'+MM(tr)+'</div></div>'+
     '<div class="kpi"><div class="lbl">Saídas operacionais</div><div class="big sm down">'+MM(td)+'</div></div></div>'+
     '<div class="kpi"><div class="lbl">Resultado operacional</div><div class="big '+(tr-td>=0?'up':'down')+'">'+MM(tr-td)+'</div></div>'+
-    (GSEL==='all'?dfcCard(GDFC,'Fluxo por atividade — grupo (DFC)'):dfcCard((GMET[GSEL]||{dfc:{op:[0,0],inv:[0,0],fin:[0,0]}}).dfc,'Fluxo por atividade — empresa (DFC)'))+
+    (GSEL==='all'?dfcCard(GDFC,'Fluxo por atividade — grupo · '+gPerLabel()):dfcCard((GMET[GSEL]||{dfc:{op:[0,0],inv:[0,0],fin:[0,0]}}).dfc,'Fluxo por atividade — empresa · '+gPerLabel()))+
     '<div class="sect" style="cursor:pointer" onclick="gtoggleLeg()">O que significa cada atividade? '+(GLEG?'▲':'▼')+'</div>'+
     (GLEG?'<div class="card" style="font-size:12px;line-height:1.6">'+
       '<p style="margin:0 0 8px"><b>DFC</b> (Demonstração dos Fluxos de Caixa) organiza o dinheiro que entra e sai em três naturezas:</p>'+
@@ -833,13 +861,14 @@ function grupoView(){
 }
 function drawGrupoChart(){
   const ctx=document.getElementById('gcv');if(!ctx)return;if(gchart)gchart.destroy();
-  const rows=grupoRows();const agg={};
+  const rows=grupoRowsChart();const agg={};
   rows.forEach(r=>{const b=gbucket(r.data);if(!agg[b])agg[b]=[0,0];agg[b][0]+=r.rec;agg[b][1]+=r.desp;});
   const keys=Object.keys(agg).sort();
   const show=keys.slice(-(GPER==='dia'?31:GPER==='semana'?26:24));
+  const selKey=GPER==='tudo'?null:gCurKey();
   gchart=new Chart(ctx,{type:'bar',data:{labels:show.map(gblabel),datasets:[
-    {label:'Receitas',data:show.map(k=>agg[k][0]/1e6),backgroundColor:'#1D9E75'},
-    {label:'Despesas',data:show.map(k=>agg[k][1]/1e6),backgroundColor:'#E24B4A'}]},
+    {label:'Entradas op.',data:show.map(k=>agg[k][0]/1e6),backgroundColor:show.map(k=>(!selKey||k===selKey)?'#1D9E75':'#B7E4D3')},
+    {label:'Saídas op.',data:show.map(k=>agg[k][1]/1e6),backgroundColor:show.map(k=>(!selKey||k===selKey)?'#E24B4A':'#F6C6C5')}]},
     options:{plugins:{legend:{position:'bottom',labels:{font:{size:10}}}},
       scales:{y:{ticks:{callback:v=>v+' MM',font:{size:10}}},x:{ticks:{font:{size:10}}}}}});
 }
