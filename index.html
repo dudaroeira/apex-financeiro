@@ -96,26 +96,38 @@ canvas{max-width:100%;}
 #login .cfg{color:var(--amber);font-size:12px;text-align:center;margin-top:14px;line-height:1.5;}
 .hidden{display:none!important;}
 
+.kpi{position:relative;overflow:hidden;}
+.kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--blue);}
+.k-g::before{background:#1D9E75}.k-b::before{background:#378ADD}.k-a::before{background:#EF9F27}.k-n::before{background:#1F3864}.k-r::before{background:#E24B4A}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px;}
+.kpis .kpi{margin-bottom:0;padding:12px 14px 12px 18px;}
+.kpis .lbl{font-size:11.5px;}
+.kpis .big{font-size:16px;margin-top:2px;}
+.biq{display:block;}
 @media (min-width:860px){
   body{background:var(--bg);}
-  #app{max-width:1040px;min-height:auto;margin:22px auto;border:1px solid var(--line);border-radius:16px;background:var(--card);display:flex;flex-direction:column;}
-  header{order:1;border-radius:16px 16px 0 0;}
-  nav{order:2;position:static;transform:none;left:auto;width:100%;max-width:none;height:auto;border-top:none;border-bottom:1px solid var(--line);justify-content:center;gap:10px;padding:8px;}
-  nav button{flex:0 0 auto;flex-direction:row;gap:8px;padding:10px 20px;font-size:14px;border-radius:10px;}
-  nav button.on{background:#E6EEF8;}
+  #app{max-width:none;margin:0;display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:auto 1fr;grid-template-areas:'side head' 'side main';min-height:100vh;border:none;border-radius:0;background:var(--bg);}
+  nav{grid-area:side;position:sticky;top:0;height:100vh;max-width:none;width:auto;transform:none;left:auto;flex-direction:column;justify-content:flex-start;gap:4px;padding:18px 12px;border-top:none;border-right:1px solid var(--line);background:var(--navy);}
+  nav::before{content:'APEX FINANCEIRO';display:block;color:#fff;font-weight:700;font-size:13px;letter-spacing:.6px;padding:6px 10px 16px;border-bottom:1px solid rgba(255,255,255,.18);margin-bottom:10px;}
+  nav button{flex:0 0 auto;flex-direction:row;justify-content:flex-start;gap:10px;padding:11px 12px;font-size:13.5px;border-radius:10px;color:#B8C4DD;}
+  nav button.on{background:rgba(255,255,255,.14);color:#fff;}
   nav button svg{width:18px;height:18px;}
-  main{order:3;padding:26px 30px 34px;}
-  .fab{order:4;position:fixed;left:auto;right:30px;bottom:30px;transform:none;width:56px;height:56px;}
+  header{grid-area:head;position:static;border-radius:0;}
+  main{grid-area:main;padding:24px 28px 46px;width:100%;max-width:1240px;}
+  .fab{left:auto;right:34px;bottom:30px;transform:none;width:56px;height:56px;}
   h1{font-size:22px;margin-bottom:18px;}
-  .kpi{padding:20px;}
-  .kpi .big{font-size:34px;} .kpi .big.sm{font-size:26px;} .kpi .lbl{font-size:14px;}
-  .row2{grid-template-columns:1fr 1fr;gap:16px;}
+  .kpi .big{font-size:30px;} .kpi .big.sm{font-size:22px;}
+  .kpis{grid-template-columns:repeat(4,1fr);gap:14px;}
+  .kpis .big{font-size:19px;}
   .card{padding:18px 20px;}
-  .sect{font-size:14px;margin:24px 0 10px;}
-  .line{font-size:14px;padding:9px 0;}
-  #main>h1,#main>.kpi,#main>.row2,#main>.sect,#main>.card,#main>.toggle,#main>.debt,#main>.note{max-width:880px;margin-left:auto;margin-right:auto;}
+  .sect{font-size:14px;margin:22px 0 10px;}
   .modal{align-items:center;}
   .sheet{max-width:560px;border-radius:18px;max-height:86vh;}
+}
+@media (min-width:1100px){
+  body[data-tab="bi"] main{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start;}
+  body[data-tab="bi"] main>*{grid-column:1/-1;}
+  body[data-tab="bi"] main .biq{grid-column:auto;}
 }
 
 </style>
@@ -306,6 +318,7 @@ function setLiq(v){LIQVIEW=v;render();}
 function setPer(v){HISTPER=v;render();}
 
 function render(){
+  document.body.setAttribute('data-tab',TAB);
   sortData();
   if(!DATA.length){renderEmpty();return;}
   if(CUR>=DATA.length)CUR=DATA.length-1;if(CUR<0)CUR=0;
@@ -758,6 +771,14 @@ function grupoRowsChart(){
   return out;
 }
 
+function kpiStrip(B){
+  B.invE=B.invE||[0,0];
+  var vop=B.op[0]-B.op[1],vinv=(B.invA[0]-B.invA[1])+(B.invG[0]-B.invG[1])+(B.invE[0]-B.invE[1]);
+  var vfin=(B.finG[0]-B.finG[1])+(B.finS[0]-B.finS[1])+(B.finD[0]-B.finD[1]);
+  var vt=vop+vinv+vfin;
+  function k(cls,l,v){return '<div class="kpi '+cls+'"><div class="lbl">'+l+'</div><div class="big sm '+(v>=0?'up':'down')+'">'+(v>=0?'+':'−')+' '+MM(Math.abs(v))+'</div></div>';}
+  return '<div class="kpis">'+k('k-g','Operacional',vop)+k('k-b','Investimento',vinv)+k('k-a','Financiamento',vfin)+k('k-n','Variação do caixa',vt)+'</div>';
+}
 function extratoCard(B,titulo,opts){
   opts=opts||{};
   function _sig(v){return (v>=0?'+ ':'− ')+BRL(Math.abs(v));}
@@ -815,7 +836,7 @@ function grupoView(){
   if(GSEL==='all'){
     const B0=buildB0();
     const list=Object.keys(GMET).map(function(c){var m=GMET[c];return {c:c,m:m,ger:m.recNeg-m.despNeg,gl:m.recG-m.despG};}).sort(function(a,b){return b.ger-a.ger;});
-    ext=extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true});
+    ext=kpiStrip(B0)+extratoCard(B0,'Resumo do caixa — grupo · '+gPerLabel(),{elimNote:true});
     rank='<div class="sect">Desempenho por empresa · '+gPerLabel()+'</div><div class="card" style="max-height:340px;overflow-y:auto">'+
       list.map(function(x){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'+
@@ -834,7 +855,7 @@ function grupoView(){
     const m=GMET[GSEL]||{recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:null};
     const Bc=m.b||{op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]};
     const nomeEmp=((GEMP[GSEL]||{}).emp||'').split(' ').slice(0,3).join(' ');
-    ext=extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});rank='';
+    ext=kpiStrip(Bc)+extratoCard(Bc,'Resumo do caixa — '+nomeEmp+' · '+gPerLabel(),{badge:badge(m)});rank='';
   }
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
   const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
@@ -1172,7 +1193,7 @@ function biView(){
   const codes=Object.keys(GEMP).sort(function(a,b){return +a-+b;});
   const opts='<option value="all"'+(GSEL==='all'?' selected':'')+'>Consolidado (grupo)</option>'+
     codes.map(function(c){return '<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>';}).join('');
-  function cardCv(t,id,h){return '<div class="sect">'+t+'</div><div class="card"><canvas id="'+id+'" height="'+(h||200)+'"></canvas></div>';}
+  function cardCv(t,id,h){return '<div class="biq"><div class="sect">'+t+'</div><div class="card"><canvas id="'+id+'" height="'+(h||200)+'"></canvas></div></div>';}
   return '<h1>BI — visão gráfica</h1>'+
     '<select onchange="gsel(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:13px;margin-bottom:6px;">'+opts+'</select>'+
     (function(){const per=function(v,l){return '<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';};
