@@ -686,6 +686,8 @@ async function loadGrupo(){
   if(GBUSY)return;GBUSY=true;
   try{
     const em=await sb.from('empresas').select('*').order('cod');
+    try{const sn=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',1).maybeSingle();
+      GSNAP=new Set((((sn||{}).data||{}).payload||{}).fps||[]);GSNAPTS=(((sn||{}).data||{}).updated_at)||null;}catch(e){GSNAP=new Set();GSNAPTS=null;}
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
@@ -703,9 +705,9 @@ async function loadGrupo(){
       all.forEach(function(r,i){if(!elig(r))return;var side=r.desp>0?'d':'r';var val=(r.desp>0?r.desp:r.rec).toFixed(2);
         var k=r.cod+'|'+r.data+'|'+val+'|'+side;(idx[k]=idx[k]||[]).push(i);});
       for(var k in idx){if(k.slice(-1)!=='d')continue;var kr=k.slice(0,-1)+'r';var ds=idx[k],rs=idx[kr]||[];
-        var n=Math.min(ds.length,rs.length);for(var j=0;j<n;j++){all[ds[j]].cl='ti';all[rs[j]].cl='ti';}}
+        var n=Math.min(ds.length,rs.length);for(var j=0;j<n;j++){all[ds[j]].cl='ti';all[ds[j]].pr=true;all[rs[j]].cl='ti';all[rs[j]].pr=true;}}
     })();
-    GDATA=all;computeElim();computeMet();
+    GDATA=all;computeElim();computeMet();buildCaps();
   }catch(e){GDATA=[];}
   GBUSY=false;
   if(TAB==='grupo')render();
@@ -908,7 +910,7 @@ function grupoView(){
     '<div class="card"><canvas id="gcv" height="230"></canvas></div>'+
     '<div class="note" style="text-align:left">'+note+'</div>'+
     pdfButtons()+
-    rank+alerts+
+    rank+alerts+gverSection()+
     '<div class="note" id="gimpNote"></div>';
 }
 function drawGrupoChart(){
@@ -1295,6 +1297,72 @@ function drawBI(){
   }
 }
 /* ============== FIM ABA BI ============== */
+
+/* ============== VERIFICADOR DE REGRAS ============== */
+let GCAP={},GSNAP=new Set(),GSNAPTS=null,GVER=false;
+const GRULES={ti_hist:'Transferência entre contas (texto)',ti_par:'Par interno ± no mesmo dia (genérico)',
+  intragrupo:'Aporte/mútuo intragrupo (texto)',intragrupo_casado:'Perna genérica casada com aporte',
+  coligadas:'Aportes a coligadas (JAX/Realty…)',soc:'Fluxo com sócios (PF)',
+  aplica:'Aplicações/resgates (texto)',transf_sem_par:'Transferência sem par → aplicação',
+  fin_kw:'Empréstimos/amortizações (texto)',inv_kw:'Investimento por texto (CDB/rendimento…)'};
+function gtoggleVer(){GVER=!GVER;render();}
+function ruleOf(r,i){
+  if(r.cl==='ti')return r.pr?'ti_par':'ti_hist';
+  if(r.cl==='soc')return 'soc';
+  if(r.cl==='bk')return 'aplica';
+  if(r.cl==='ig')return r.jx?'coligadas':'intragrupo';
+  if(GELIM.has(i))return 'intragrupo_casado';
+  if(r.at==='fin')return 'fin_kw';
+  if(r.at==='inv')return normU(r.tipo||'').indexOf('TRANSFER')>=0?'transf_sem_par':'inv_kw';
+  return null;
+}
+function buildCaps(){
+  GCAP={};
+  if(!GDATA)return;
+  GDATA.forEach(function(r,i){
+    var k=ruleOf(r,i);if(!k)return;
+    var fp=k+'|'+r.cod+'|'+r.data+'|'+(r.desp>0?'d':'r')+'|'+(r.desp>0?r.desp:r.rec).toFixed(2);
+    if(!GCAP[k])GCAP[k]={rows:[],news:[],val:0};
+    GCAP[k].rows.push(r);GCAP[k].val+=r.rec+r.desp;
+    if(!GSNAP.has(fp))GCAP[k].news.push(r);
+    r.fp=fp;
+  });
+}
+function gverNewTotal(){var n=0;for(var k in GCAP)n+=GCAP[k].news.length;return n;}
+function gdrillRule(k,mode){
+  var c=GCAP[k];if(!c)return;
+  var rows=mode==='new'?c.news:c.rows;
+  gdrillShow(GRULES[k],rows.length+' lançamentos'+(mode==='new'?' novos (não validados)':''),rows,'all');
+}
+function validateCaps(){
+  if(!isManager)return;
+  var fps=[];GDATA.forEach(function(r){if(r.fp)fps.push(r.fp);});
+  sb.from('regras_snapshot').upsert({id:1,payload:{fps:fps,ts:new Date().toISOString()},updated_at:new Date().toISOString()},{onConflict:'id'})
+    .then(function(res){
+      if(res.error){alert('Erro ao validar: '+res.error.message);return;}
+      GSNAP=new Set(fps);GSNAPTS=new Date().toISOString();buildCaps();render();
+    });
+}
+function gverSection(){
+  if(!GDATA||!GDATA.length)return '';
+  var totNew=gverNewTotal();
+  var html='<div class="sect" style="cursor:pointer" onclick="gtoggleVer()">Verificador de regras'+(totNew?' · <b style="color:var(--amber)">'+totNew+' nova(s) captura(s)</b>':' · tudo validado')+' '+(GVER?'▲':'▼')+'</div>';
+  if(!GVER)return html;
+  html+='<div class="card">';
+  var keys=Object.keys(GRULES).filter(function(k){return GCAP[k];});
+  if(!keys.length)html+='<div class="line"><span>Nenhuma captura.</span></div>';
+  keys.forEach(function(k){
+    var c=GCAP[k];
+    html+='<div class="line" style="cursor:pointer" onclick="gdrillRule(\''+k+'\',\''+(c.news.length?'new':'all')+'\')">'+
+      '<span style="font-size:12px">'+GRULES[k]+(c.news.length?'<br><span style="color:var(--amber);font-weight:600">'+c.news.length+' nova(s) — toque para revisar</span>':'')+'</span>'+
+      '<span class="v" style="font-size:12px">'+c.rows.length+' lçtos · '+MM(c.val)+'</span></div>';
+  });
+  html+='</div>';
+  html+='<div class="note" style="text-align:left">Cada linha mostra o que a regra capturou; "novas" são capturas surgidas desde a última validação'+(GSNAPTS?' ('+fromISO(GSNAPTS.slice(0,10))+')':' (nunca validado)')+'. Toque para ver os lançamentos.</div>';
+  if(isManager)html+='<div style="margin:6px 0 4px"><button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="validateCaps()">Validar capturas atuais'+(totNew?' ('+totNew+')':'')+'</button></div>';
+  return html;
+}
+/* ============== FIM VERIFICADOR ============== */
 
 boot();
 </script>
