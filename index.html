@@ -1390,27 +1390,47 @@ function ruleOf(r,i){
   if(r.at==='inv')return normU(r.tipo||'').indexOf('TRANSFER')>=0?'transf_sem_par':'inv_kw';
   return null;
 }
+/* O que se valida é a REDAÇÃO, não o lançamento: números, datas e pontuação saem,
+   sobra o jeito de escrever. Validado um texto, todo lançamento futuro com a mesma
+   redação já nasce conferido — só redação nova volta a pedir atenção. */
+function gPadrao(r){
+  return normU((r.hist||'')+' '+(r.nominal||''))
+    .replace(/[0-9]+([.,][0-9]+)*/g,'#')
+    .replace(/[^A-Z# ]/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
 function buildCaps(){
   GCAP={};
   if(!GDATA)return;
   GDATA.forEach(function(r,i){
     var k=ruleOf(r,i);if(!k)return;
-    var fp=k+'|'+r.cod+'|'+r.data+'|'+(r.desp>0?'d':'r')+'|'+(r.desp>0?r.desp:r.rec).toFixed(2);
-    if(!GCAP[k])GCAP[k]={rows:[],news:[],val:0};
-    GCAP[k].rows.push(r);GCAP[k].val+=r.rec+r.desp;
-    if(!GSNAP.has(fp))GCAP[k].news.push(r);
+    var p=gPadrao(r)||'(sem texto)',fp=k+'|'+p;
+    if(!GCAP[k])GCAP[k]={rows:[],val:0,pats:{},list:[],nNew:0};
+    var c=GCAP[k];
+    c.rows.push(r);c.val+=r.rec+r.desp;
+    var P=c.pats[p];
+    if(!P)P=c.pats[p]={p:p,fp:fp,rows:[],val:0,nova:!GSNAP.has(fp)};
+    P.rows.push(r);P.val+=r.rec+r.desp;
     r.fp=fp;
   });
+  for(var k in GCAP){
+    var c=GCAP[k];
+    c.list=Object.keys(c.pats).map(function(p){return c.pats[p];}).sort(function(a,b){return b.val-a.val;});
+    c.nNew=c.list.filter(function(x){return x.nova;}).length;
+  }
 }
-function gverNewTotal(){var n=0;for(var k in GCAP)n+=GCAP[k].news.length;return n;}
-function gdrillRule(k,mode){
-  var c=GCAP[k];if(!c)return;
-  var rows=mode==='new'?c.news:c.rows;
-  gdrillShow(GRULES[k],rows.length+' lançamentos'+(mode==='new'?' novos (não validados)':''),rows,'all');
+function gverNewTotal(){var n=0;for(var k in GCAP)n+=GCAP[k].nNew;return n;}
+function gverPatTotal(){var n=0;for(var k in GCAP)n+=GCAP[k].list.length;return n;}
+let GVEROPEN={};
+function gverToggleRule(k){GVEROPEN[k]=!GVEROPEN[k];render();}
+function gdrillPat(k,i){
+  var c=GCAP[k];if(!c)return;var P=c.list[i];if(!P)return;
+  gdrillShow(GRULES[k],P.p+' · '+P.rows.length+' lançamento(s)',P.rows,'all');
 }
 function validateCaps(){
   if(!isManager)return;
-  var fps=[];GDATA.forEach(function(r){if(r.fp)fps.push(r.fp);});
+  var s={};GDATA.forEach(function(r){if(r.fp)s[r.fp]=1;});
+  var fps=Object.keys(s);
   sb.from('regras_snapshot').upsert({id:1,payload:{fps:fps,ts:new Date().toISOString()},updated_at:new Date().toISOString()},{onConflict:'id'})
     .then(function(res){
       if(res.error){alert('Erro ao validar: '+res.error.message);return;}
@@ -1419,21 +1439,26 @@ function validateCaps(){
 }
 function gverSection(){
   if(!GDATA||!GDATA.length)return '';
-  var totNew=gverNewTotal();
-  var html='<div class="sect" style="cursor:pointer" onclick="gtoggleVer()">Verificador de regras'+(totNew?' · <b style="color:var(--amber)">'+totNew+' nova(s) captura(s)</b>':' · tudo validado')+' '+(GVER?'▲':'▼')+'</div>';
+  var totNew=gverNewTotal(),totPat=gverPatTotal();
+  var html='<div class="sect" style="cursor:pointer" onclick="gtoggleVer()">Verificador de regras'+(totNew?' · <b style="color:var(--amber)">'+totNew+' redação(ões) nova(s)</b>':' · tudo validado')+' '+(GVER?'▲':'▼')+'</div>';
   if(!GVER)return html;
   html+='<div class="card">';
   var keys=Object.keys(GRULES).filter(function(k){return GCAP[k];});
   if(!keys.length)html+='<div class="line"><span>Nenhuma captura.</span></div>';
   keys.forEach(function(k){
-    var c=GCAP[k];
-    html+='<div class="line" style="cursor:pointer" onclick="gdrillRule(\''+k+'\',\''+(c.news.length?'new':'all')+'\')">'+
-      '<span style="font-size:12px">'+GRULES[k]+(c.news.length?'<br><span style="color:var(--amber);font-weight:600">'+c.news.length+' nova(s) — toque para revisar</span>':'')+'</span>'+
-      '<span class="v" style="font-size:12px">'+c.rows.length+' lçtos · '+MM(c.val)+'</span></div>';
+    var c=GCAP[k],ab=GVEROPEN[k];
+    html+='<div class="line" style="cursor:pointer" onclick="gverToggleRule(\''+k+'\')">'+
+      '<span style="font-size:12px">'+(ab?'▲ ':'▼ ')+GRULES[k]+(c.nNew?'<br><span style="color:var(--amber);font-weight:600">'+c.nNew+' redação(ões) nova(s) — toque para revisar</span>':'')+'</span>'+
+      '<span class="v" style="font-size:12px">'+c.list.length+' redação(ões) · '+c.rows.length+' lçtos<br>'+MM(c.val)+'</span></div>';
+    if(ab)c.list.forEach(function(P,i){
+      html+='<div class="line" style="cursor:pointer;padding-left:14px;background:var(--bg2,transparent)" onclick="gdrillPat(\''+k+'\','+i+')">'+
+        '<span style="font-size:11.5px;color:var(--mut)">'+(P.nova?'<b style="color:var(--amber)">novo · </b>':'')+(P.p||'(sem texto)').slice(0,64)+'</span>'+
+        '<span class="v" style="font-size:11.5px">'+P.rows.length+'× · '+MM(P.val)+'</span></div>';
+    });
   });
   html+='</div>';
-  html+='<div class="note" style="text-align:left">Cada linha mostra o que a regra capturou; "novas" são capturas surgidas desde a última validação'+(GSNAPTS?' ('+fromISO(GSNAPTS.slice(0,10))+')':' (nunca validado)')+'. Toque para ver os lançamentos.</div>';
-  if(isManager)html+='<div style="margin:6px 0 4px"><button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="validateCaps()">Validar capturas atuais'+(totNew?' ('+totNew+')':'')+'</button></div>';
+  html+='<div class="note" style="text-align:left">O que se valida aqui é a <b>redação</b> do lançamento, não o lançamento em si: números, datas e pontuação são ignorados. São '+totPat+' redação(ões) distintas por trás de '+(GDATA?GCAP&&Object.keys(GCAP).reduce(function(a,k){return a+GCAP[k].rows.length;},0):0)+' lançamentos capturados. Validada uma redação, todo lançamento futuro escrito do mesmo jeito já entra conferido — só texto novo volta a pedir atenção'+(GSNAPTS?' (última validação em '+fromISO(GSNAPTS.slice(0,10))+')':' (nunca validado — a primeira validação define o marco zero)')+'. Toque numa redação para ver os lançamentos dela.</div>';
+  if(isManager)html+='<div style="margin:6px 0 4px"><button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="validateCaps()">Validar redações atuais'+(totNew?' ('+totNew+' nova(s))':'')+'</button></div>';
   return html;
 }
 /* ============== AUDITORIA DA IMPORTAÇÃO (R5/R6/R7/R8) ============== */
