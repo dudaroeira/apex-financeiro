@@ -643,9 +643,15 @@ function classLanc(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
   if(/APORTE.{0,4}CAPITAL|APORTE CAP|\bMUTUO\b/.test(t)||t.indexOf(' P/ ')>=0)return 'ig';
   if(/APLICA|RESGATE/.test(t))return 'bk';
   return 'n';}
-let GELIM=new Set(),GAL={a1:[],a2:[],a4:[]};
+/* --- auditoria automática: texto útil do lançamento --- */
+function gTxtU(r){return normU((r.hist||'')+' '+(r.nominal||''));}
+function gTClean(r){return gTxtU(r).replace(/N\/A|NAO PERSONALIZADO/g,'').replace(/[^A-Z0-9]/g,'');}
+/* R5: sem descrição = nenhuma regra pegou, não é transferência (essas já viram aplicação
+   presumida) e o texto não diz nada. Sem texto, o lançamento cai no Operacional por omissão. */
+function isSemDesc(r){return r.cl==='n'&&normU(r.tipo||'').indexOf('TRANSFER')<0&&gTClean(r).length<4;}
+let GELIM=new Set(),GAL={a1:[],a2:[],a4:[],a5:[],a6:[]};
 function computeElim(){
-  GELIM=new Set();GAL={a1:[],a2:[],a4:[]};
+  GELIM=new Set();GAL={a1:[],a2:[],a4:[],a5:[],a6:[]};
   if(!GDATA)return;
   const strongIdx={},anyIdx={};
   GDATA.forEach(function(r,i){
@@ -681,13 +687,67 @@ function computeElim(){
   });
   for(const k in tiday){const v=tiday[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');GAL.a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
   GAL.a1.sort(function(a,b){return a.data<b.data?-1:1;});
+  /* ---- R5: lançamentos sem descrição ---- */
+  GDATA.forEach(function(r){if(isSemDesc(r))GAL.a5.push(r);});
+  GAL.a5.sort(function(a,b){return a.data<b.data?-1:1;});
+  /* ---- R6: bloco de entradas sem descrição que casa com pagamento de empréstimo/banco
+          no mesmo dia e na mesma empresa → provável financiamento lido como operacional ---- */
+  var kwd={},bkd={},anyd={};
+  GDATA.forEach(function(r){
+    if(!(r.desp>0))return;
+    var k=r.cod+'|'+r.data,t=gTxtU(r);
+    if(/AMORTIZA|EMPRESTIM|FINANCIAMENT|BNDES|CAPITAL DE GIRO|CONSORCIO/.test(t))kwd[k]=(kwd[k]||0)+r.desp;
+    if(/\bBANCO\b|ITAU|BRADESCO|SANTANDER|CAIXA ECONOMICA|\bBRB\b|SICOOB|SICREDI|UNIBANCO|SAFRA/.test(t))bkd[k]=(bkd[k]||0)+r.desp;
+    (anyd[k]=anyd[k]||[]).push(r.desp);
+  });
+  var g5={};
+  GAL.a5.forEach(function(r){
+    if(!(r.rec>0))return;
+    var k=r.cod+'|'+r.data;
+    if(!g5[k])g5[k]={cod:r.cod,data:r.data,q:0,s:0};
+    g5[k].q++;g5[k].s+=r.rec;
+  });
+  for(const k in g5){
+    var g=g5[k],kw=kwd[k],bk=bkd[k],lst=anyd[k]||[],hit=null;
+    if(kw!==undefined&&Math.abs(kw-g.s)<0.01)hit={v:kw,via:'pagamento de empréstimo no mesmo dia',ex:true};
+    else if(bk!==undefined&&Math.abs(bk-g.s)<0.01)hit={v:bk,via:'pagamento a banco no mesmo dia',ex:true};
+    else if(lst.some(function(v){return Math.abs(v-g.s)<0.01;}))hit={v:g.s,via:'saída única de mesmo valor no dia',ex:true};
+    else if(kw!==undefined&&Math.abs(kw-g.s)<=0.03*g.s)hit={v:kw,via:'pagamento de empréstimo no mesmo dia',ex:false};
+    else if(bk!==undefined&&Math.abs(bk-g.s)<=0.03*g.s)hit={v:bk,via:'pagamento a banco no mesmo dia',ex:false};
+    if(hit)GAL.a6.push({cod:g.cod,data:g.data,q:g.q,s:g.s,cv:hit.v,via:hit.via,ex:hit.ex});
+  }
+  GAL.a6.sort(function(a,b){return a.data<b.data?-1:1;});
 }
+/* ---- R8: cobertura da importação ---- */
+function gCobertura(){
+  var out={faltam:[],meses:[],gaps:[],ult:null,defas:0};
+  if(!GDATA||!GDATA.length)return out;
+  var has={},ms={};
+  GDATA.forEach(function(r){has[r.cod]=1;ms[(''+r.data).slice(0,7)]=1;});
+  Object.keys(GEMP).forEach(function(c){if(!has[c])out.faltam.push(c);});
+  out.meses=Object.keys(ms).sort();
+  out.ult=out.meses[out.meses.length-1]||null;
+  if(out.meses.length){
+    var a=out.meses[0].split('-'),b=out.ult.split('-'),y=+a[0],m=+a[1];
+    while(y<+b[0]||(y===+b[0]&&m<=+b[1])){
+      var kk=y+'-'+(m<10?'0':'')+m;
+      if(!ms[kk])out.gaps.push(kk);
+      m++;if(m>12){m=1;y++;}
+    }
+    var hoje=new Date(),p=out.ult.split('-');
+    out.defas=(hoje.getFullYear()-+p[0])*12+(hoje.getMonth()+1-+p[1]);
+  }
+  return out;
+}
+function gMesLabel(k){var p=(''+k).split('-');return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+p[1]-1]+'/'+p[0];}
 async function loadGrupo(){
   if(GBUSY)return;GBUSY=true;
   try{
     const em=await sb.from('empresas').select('*').order('cod');
     try{const sn=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',1).maybeSingle();
       GSNAP=new Set((((sn||{}).data||{}).payload||{}).fps||[]);GSNAPTS=(((sn||{}).data||{}).updated_at)||null;}catch(e){GSNAP=new Set();GSNAPTS=null;}
+    try{const sa=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',2).maybeSingle();
+      GAUD=new Set((((sa||{}).data||{}).payload||{}).fps||[]);GAUDTS=(((sa||{}).data||{}).updated_at)||null;}catch(e){GAUD=new Set();GAUDTS=null;}
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
@@ -874,7 +934,10 @@ function grupoView(){
   const fA1=GSEL==='all'?GAL.a1:GAL.a1.filter(function(x){return x.cod===GSEL;});
   const fA2=GSEL==='all'?GAL.a2:GAL.a2.filter(function(x){return x.cod===GSEL;});
   const fA4=GSEL==='all'?GAL.a4:GAL.a4.filter(function(x){return x.cod===GSEL;});
-  const nAl=fA1.length+fA2.length;
+  const fA5=GSEL==='all'?GAL.a5:GAL.a5.filter(function(x){return x.cod===GSEL;});
+  const fA6=GSEL==='all'?GAL.a6:GAL.a6.filter(function(x){return x.cod===GSEL;});
+  const a5tot=fA5.reduce(function(a,x){return a+x.desp+x.rec;},0);
+  const nAl=fA1.length+fA2.length+fA5.length;
   const r4tot=fA4.reduce(function(a,x){return a+x.desp+x.rec;},0);
   const escopo=GSEL==='all'?' (grupo)':' (desta empresa)';
   let alerts='<div class="sect" style="cursor:pointer" onclick="gtoggleAlerts()">Consistência'+escopo+': '+nAl+' pendência(s)'+(fA4.length?' · '+fA4.length+' aporte(s) regra 4':'')+' '+(GALERTS?'▲':'▼')+'</div>';
@@ -883,9 +946,13 @@ function grupoView(){
     if(!nAl&&!fA4.length)alerts+='<div class="line"><span>Nenhuma pendência'+escopo+'.</span></div>';
     fA1.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R1] '+x.cod+' '+fromISO(x.data)+' transf. entre contas sem par no dia</span><span class="v" style="font-size:12px">D '+BRL(x.desp)+' × R '+BRL(x.rec)+'</span></div>';});
     fA2.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R2] '+x.cod+' '+fromISO(x.data)+' '+(x.desp>0?'enviado sem espelho':'recebido sem origem')+'<br><span style="color:var(--mut2)">'+gLabel(x)+'</span></span><span class="v" style="font-size:12px">'+BRL(x.desp>0?x.desp:x.rec)+'</span></div>';});
+    if(fA5.length)alerts+='<div class="line" style="cursor:pointer" onclick="gdrillSemDesc()"><span style="font-size:12px">[R5] Lançamentos sem descrição — entram no Operacional por omissão<br><span style="color:var(--mut2)">toque para ver e mandar descrever no ERP</span></span><span class="v" style="font-size:12px">'+fA5.length+' lçtos · '+BRL(a5tot)+'</span></div>';
+    fA6.forEach(function(x){alerts+='<div class="line"><span style="font-size:12px">[R6] '+x.cod+' '+fromISO(x.data)+' — '+x.q+' entradas sem descrição '+(x.ex?'batem <b>exatamente</b>':'quase batem')+' com '+x.via+'<br><span style="color:var(--mut2)">provável financiamento lido como receita operacional'+(x.ex?'':' · diferença '+BRL(Math.abs(x.cv-x.s)))+'</span></span><span class="v" style="font-size:12px">'+BRL(x.s)+'</span></div>';});
     if(fA4.length)alerts+='<div class="line"><span style="font-size:12px">[R4] Aportes a coligadas de outro grupo (JAX/JR6/R26/SQNW/Aria) — contam como Investimento</span><span class="v" style="font-size:12px">'+fA4.length+' lçtos · '+BRL(r4tot)+'</span></div>';
-    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
+    alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R5: sem histórico nem nominal, a classificação não tem como decidir e o lançamento vira receita/despesa operacional. R6: quando um bloco de entradas sem descrição fecha com um pagamento de empréstimo do mesmo dia, quase sempre é financiamento — confirme antes de fechar o mês. R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
+    alerts+=gAudDelta();
   }
+  alerts+=gCobSection();
   return '<h1>Grupo Apex</h1>'+
     '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
     '<select onchange="gsel(this.value)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">'+opts+'</select>'+mgrBtn+'</div>'+
@@ -1136,7 +1203,12 @@ function pdfButtons(){
   return '<div class="sect">Relatórios do grupo (PDF) · '+gPerLabel()+'</div>'+
     '<div style="display:flex;gap:10px;margin-bottom:4px;">'+
     '<button class="btn-s" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfGrupo(false)">Enxuto (1–2 pág.)</button>'+
-    '<button class="btn-p" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfGrupo(true)">Completo (diretoria)</button></div>';
+    '<button class="btn-p" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfGrupo(true)">Completo (diretoria)</button></div>'+
+    '<div class="sect">Relatório de inconsistências (financeiro) · todo o período importado</div>'+
+    '<div style="display:flex;gap:10px;margin-bottom:4px;">'+
+    '<button class="btn-s" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfInconsist()">PDF de auditoria</button>'+
+    '<button class="btn-p" style="flex:1;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="xlsInconsist()">Planilha para o gerente</button></div>'+
+    '<div class="note" style="text-align:left">O PDF é o documento de registro da conferência. A planilha vai para o gerente responder e corrigir no ERP — traz uma linha por pendência (R1, R2, R5 e R6) e duas colunas em branco para a resposta dele. Os dois cobrem todo o período importado, não o período selecionado acima.</div>';
 }
 function _pdftx(x){return (''+x).replace(/\u2212/g,'-').replace(/\u2014/g,'-').replace(/[\u25B2\u25BC\u25AC]/g,'').replace(/\u00B7/g,'.').replace(/\u2026/g,'...');}
 function _ghdr(doc,title){
@@ -1211,9 +1283,9 @@ function pdfGrupo(completo){
       theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8.5},styles:{fontSize:7.5,cellPadding:3},
       columnStyles:{0:{cellWidth:158},1:{halign:'right',cellWidth:90},2:{cellWidth:158},3:{halign:'right',cellWidth:90}},margin:{left:M,right:M}});
     y2=doc.lastAutoTable.finalY+14;
-    const nA=GAL.a1.length+GAL.a2.length;
+    const nA=GAL.a1.length+GAL.a2.length+GAL.a5.length;
     doc.setFontSize(9.5);
-    doc.text(doc.splitTextToSize(_pdftx('Consistência: '+nA+' pendência(s) — '+GAL.a1.length+' de transferência entre contas (regra 1) e '+GAL.a2.length+' de espelhamento entre empresas (regra 2). Aportes a coligadas (JAX e outros): '+GAL.a4.length+' lançamentos, classificados como Investimento. Detalhes no app, aba Grupo > Consistência.'),CW),M,y2);
+    doc.text(doc.splitTextToSize(_pdftx('Consistência: '+nA+' pendência(s) — '+GAL.a1.length+' de transferência entre contas (regra 1), '+GAL.a2.length+' de espelhamento entre empresas (regra 2) e '+GAL.a5.length+' sem descrição (regra 5), estas últimas somando '+BRL(GAL.a5.reduce(function(a,x){return a+x.desp+x.rec;},0))+' e lidas como operacional por falta de histórico'+(GAL.a6.length?'; '+GAL.a6.length+' bloco(s) coincidem com pagamento de empréstimo no mesmo dia (regra 6)':'')+'. Aportes a coligadas (JAX e outros): '+GAL.a4.length+' lançamentos, classificados como Investimento. Detalhes no app, aba Grupo > Consistência.'),CW),M,y2);
   }
   _ftr(doc);
   _output(doc,'Apex_Grupo_'+(completo?'Completo_':'Resumo_')+gPerLabel().replace(/[\/ ]/g,'-')+'.pdf');
@@ -1304,7 +1376,8 @@ const GRULES={ti_hist:'Transferência entre contas (texto)',ti_par:'Par interno 
   intragrupo:'Aporte/mútuo intragrupo (texto)',intragrupo_casado:'Perna genérica casada com aporte',
   coligadas:'Aportes a coligadas (JAX/Realty…)',soc:'Fluxo com sócios (PF)',
   aplica:'Aplicações/resgates (texto)',transf_sem_par:'Transferência sem par → aplicação',
-  fin_kw:'Empréstimos/amortizações (texto)',inv_kw:'Investimento por texto (CDB/rendimento…)'};
+  fin_kw:'Empréstimos/amortizações (texto)',inv_kw:'Investimento por texto (CDB/rendimento…)',
+  sem_desc:'Sem descrição — caiu no Operacional por omissão'};
 function gtoggleVer(){GVER=!GVER;render();}
 function ruleOf(r,i){
   if(r.cl==='ti')return r.pr?'ti_par':'ti_hist';
@@ -1312,6 +1385,7 @@ function ruleOf(r,i){
   if(r.cl==='bk')return 'aplica';
   if(r.cl==='ig')return r.jx?'coligadas':'intragrupo';
   if(GELIM.has(i))return 'intragrupo_casado';
+  if(isSemDesc(r))return 'sem_desc';
   if(r.at==='fin')return 'fin_kw';
   if(r.at==='inv')return normU(r.tipo||'').indexOf('TRANSFER')>=0?'transf_sem_par':'inv_kw';
   return null;
@@ -1361,6 +1435,194 @@ function gverSection(){
   html+='<div class="note" style="text-align:left">Cada linha mostra o que a regra capturou; "novas" são capturas surgidas desde a última validação'+(GSNAPTS?' ('+fromISO(GSNAPTS.slice(0,10))+')':' (nunca validado)')+'. Toque para ver os lançamentos.</div>';
   if(isManager)html+='<div style="margin:6px 0 4px"><button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="validateCaps()">Validar capturas atuais'+(totNew?' ('+totNew+')':'')+'</button></div>';
   return html;
+}
+/* ============== AUDITORIA DA IMPORTAÇÃO (R5/R6/R7/R8) ============== */
+let GAUD=new Set(),GAUDTS=null;
+function gdrillSemDesc(){
+  var rows=GSEL==='all'?GAL.a5:GAL.a5.filter(function(x){return x.cod===GSEL;});
+  gdrillShow('Lançamentos sem descrição',rows.length+' lançamentos — pedir ao gerente para descrever no ERP e reimportar',rows,'all');
+}
+/* impressão digital de cada pendência, para comparar com a importação anterior */
+function gAudFps(){
+  var f=[];
+  GAL.a1.forEach(function(x){f.push('R1|'+x.cod+'|'+x.data+'|'+x.desp.toFixed(2)+'|'+x.rec.toFixed(2));});
+  GAL.a2.forEach(function(x){f.push('R2|'+x.cod+'|'+x.data+'|'+(x.desp>0?x.desp:x.rec).toFixed(2));});
+  GAL.a4.forEach(function(x){f.push('R4|'+x.cod+'|'+x.data+'|'+(x.desp>0?x.desp:x.rec).toFixed(2));});
+  GAL.a5.forEach(function(x){f.push('R5|'+x.cod+'|'+x.data+'|'+(x.desp>0?x.desp:x.rec).toFixed(2));});
+  GAL.a6.forEach(function(x){f.push('R6|'+x.cod+'|'+x.data+'|'+x.s.toFixed(2));});
+  return f;
+}
+function gAudDelta(){
+  if(!GDATA||!GDATA.length)return '';
+  var fps=gAudFps(),cur=new Set(fps),novas=0,resolvidas=0;
+  fps.forEach(function(k){if(!GAUD.has(k))novas++;});
+  GAUD.forEach(function(k){if(!cur.has(k))resolvidas++;});
+  var mantidas=fps.length-novas;
+  var txt=GAUD.size
+    ? '<b'+(novas?' style="color:var(--amber)"':'')+'>'+novas+' nova(s)</b> · '+mantidas+' ainda aberta(s) · '+resolvidas+' resolvida(s) desde a conferência de '+(GAUDTS?fromISO(GAUDTS.slice(0,10)):'—')
+    : 'Nenhuma conferência registrada ainda — ao revisar, toque no botão abaixo para marcar o ponto de partida.';
+  var h='<div class="note" style="text-align:left">Comparação com a importação anterior: '+txt+'</div>';
+  if(isManager)h+='<div style="margin:6px 0 4px"><button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="validateAud()">Registrar conferência destas pendências'+(novas?' ('+novas+' nova(s))':'')+'</button></div>';
+  return h;
+}
+function validateAud(){
+  if(!isManager)return;
+  var fps=gAudFps();
+  sb.from('regras_snapshot').upsert({id:2,payload:{fps:fps,ts:new Date().toISOString()},updated_at:new Date().toISOString()},{onConflict:'id'})
+    .then(function(res){
+      if(res.error){alert('Erro ao registrar: '+res.error.message);return;}
+      GAUD=new Set(fps);GAUDTS=new Date().toISOString();render();
+    });
+}
+function gCobSection(){
+  if(!GDATA||!GDATA.length)return '';
+  var c=gCobertura(),av=[];
+  if(c.faltam.length)av.push('<b style="color:var(--amber)">'+c.faltam.length+' empresa(s) cadastrada(s) sem nenhum lançamento importado: '+c.faltam.join(', ')+'</b>');
+  if(c.gaps.length)av.push('<b style="color:var(--amber)">mês(es) sem lançamento no meio do período: '+c.gaps.map(gMesLabel).join(', ')+'</b>');
+  if(c.defas>=2)av.push('<b style="color:var(--amber)">a base vai só até '+gMesLabel(c.ult)+' — '+c.defas+' meses de defasagem</b>');
+  else if(c.defas===1)av.push('a base vai até '+gMesLabel(c.ult)+' — falta fechar o mês corrente');
+  var ok=Object.keys(GEMP).length-c.faltam.length;
+  return '<div class="note" style="text-align:left">Cobertura da importação: '+ok+' de '+Object.keys(GEMP).length+' empresas · '+c.meses.length+' mês(es), de '+(c.meses.length?gMesLabel(c.meses[0]):'—')+' a '+(c.ult?gMesLabel(c.ult):'—')+(av.length?'. '+av.join('. ')+'.':'. Sem falhas de cobertura.')+'</div>';
+}
+/* ---- Relatório de inconsistências: base comum do PDF e da planilha ---- */
+function gPendRows(){
+  var out=[];
+  function nm(c){return c+' - '+((GEMP[c]||{}).emp||'');}
+  GAL.a1.forEach(function(x){out.push({r:'R1',cod:x.cod,emp:nm(x.cod),data:x.data,tipo:'Transferência',
+    txt:'TRANSFERENCIA ENTRE CONTAS (total do dia)',ent:x.rec,sai:x.desp,
+    obs:'Saídas e entradas de transferência entre contas não fecham no dia; diferença de '+BRL(Math.abs(x.desp-x.rec))+'. Verificar conta de aplicação fora do relatório de fluxo ou lançamento faltante.'});});
+  GAL.a2.forEach(function(x){out.push({r:'R2',cod:x.cod,emp:nm(x.cod),data:x.data,tipo:x.tipo||'',
+    txt:gLabel(x),ent:x.rec,sai:x.desp,
+    obs:(x.desp>0?'Aporte/mútuo enviado sem espelho na empresa destinatária.':'Recebimento sem a saída correspondente na empresa de origem.')+' Conferir omissão de lançamento, data/valor divergente ou conta não contemplada.'});});
+  GAL.a5.forEach(function(x){out.push({r:'R5',cod:x.cod,emp:nm(x.cod),data:x.data,tipo:x.tipo||'',
+    txt:(((x.hist||'')+' '+(x.nominal||'')).replace(/\s+/g,' ').trim())||'(sem texto)',ent:x.rec,sai:x.desp,
+    obs:'Sem histórico e sem nominal úteis: a classificação não tem como decidir e o lançamento entra como operacional. Descrever no ERP e reimportar.'});});
+  GAL.a6.forEach(function(x){out.push({r:'R6',cod:x.cod,emp:nm(x.cod),data:x.data,tipo:'(bloco do dia)',
+    txt:x.q+' entradas sem descrição no mesmo dia',ent:x.s,sai:0,
+    obs:'O bloco '+(x.ex?'fecha exatamente':'quase fecha, com diferença de '+BRL(Math.abs(x.cv-x.s)))+' com '+x.via+' de '+BRL(x.cv)+'. Provável financiamento sendo lido como receita operacional — confirmar a natureza antes de fechar o mês.'});});
+  out.sort(function(a,b){return a.r===b.r?(a.data<b.data?-1:1):(a.r<b.r?-1:1);});
+  return out;
+}
+function _pendSum(arr,f){return arr.reduce(function(a,x){return a+f(x);},0);}
+function gPendPeriodo(){var c=gCobertura();return c.meses.length?gMesLabel(c.meses[0])+' a '+gMesLabel(c.ult):'—';}
+function pdfInconsist(){
+  if(!GDATA||!GDATA.length){alert('Nenhum lançamento importado.');return;}
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
+  const blue=[46,117,182],M=40,W=doc.internal.pageSize.getWidth(),CW=W-2*M;
+  const rows=gPendRows(),cob=gCobertura(),per=gPendPeriodo(),nEmp=Object.keys(GEMP).length;
+  doc.setFillColor(31,56,100);doc.rect(0,0,W,72,'F');
+  doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(15);
+  doc.text(_pdftx('Apex Engenharia - Relatório de Inconsistências'),M,32);
+  doc.setFont(undefined,'normal');doc.setFontSize(10);
+  doc.text(_pdftx('Fluxo de caixa do grupo ('+nEmp+' empresas) . período '+per+' . para conferência do financeiro'),M,52);
+  doc.setTextColor(0);
+  const intro='Este relatório consolida as inconsistências apontadas pela verificação automática de regras do aplicativo sobre os '+GDATA.length+' lançamentos importados de '+nEmp+' empresas. As pendências referem-se às regras de consistência entre lançamentos e à qualidade da descrição no ERP; a prova contábil de cada arquivo (saldo inicial + receitas - despesas = saldo final) é validada na importação e não é objeto deste documento.';
+  doc.setFontSize(9.5);
+  const iL=doc.splitTextToSize(_pdftx(intro),CW);doc.text(iL,M,90);
+  let y=90+iL.length*11+12;
+  doc.setFont(undefined,'bold');doc.setFontSize(11);doc.text('Sumário',M,y);doc.setFont(undefined,'normal');y+=8;
+  const sum=[
+    ['Regra 1 - transferência entre contas sem par no dia',GAL.a1.length,_pendSum(GAL.a1,function(x){return Math.abs(x.desp-x.rec);}),GAL.a1.length?'Pendente de auditoria':'Sem pendência'],
+    ['Regra 2 - aporte/mútuo sem espelho na outra empresa',GAL.a2.length,_pendSum(GAL.a2,function(x){return x.desp+x.rec;}),GAL.a2.length?'Pendente de auditoria':'Sem pendência'],
+    ['Regra 5 - lançamento sem descrição (vira operacional)',GAL.a5.length,_pendSum(GAL.a5,function(x){return x.desp+x.rec;}),GAL.a5.length?'Descrever no ERP':'Sem pendência'],
+    ['Regra 6 - bloco sem descrição que casa com empréstimo',GAL.a6.length,_pendSum(GAL.a6,function(x){return x.s;}),GAL.a6.length?'Confirmar natureza':'Sem pendência'],
+    ['Regra 4 - aportes a coligadas fora dos arquivos (informativo)',GAL.a4.length,_pendSum(GAL.a4,function(x){return x.desp+x.rec;}),'Esperado pela regra 4']
+  ];
+  doc.autoTable({startY:y+4,head:[['Item','Qtde','Valor envolvido','Situação']],
+    body:sum.map(function(r){return [r[0],''+r[1],BRL(r[2]),r[3]].map(_pdftx);}),
+    theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:9},styles:{fontSize:8,cellPadding:4},
+    columnStyles:{0:{cellWidth:245},1:{halign:'center',cellWidth:42},2:{halign:'right',cellWidth:110}},margin:{left:M,right:M}});
+  y=doc.lastAutoTable.finalY+16;
+  const secs=[
+    {k:'R1',t:'1. Regra 1 - transferência entre contas sem contrapartida',
+     d:'Todo lançamento com histórico "TRANSFERENCIA ENTRE CONTAS" deve ter contrapartida no mesmo dia, com valores idênticos entre despesa e receita, dentro da mesma empresa.'},
+    {k:'R2',t:'2. Regra 2 - aporte/mútuo sem espelho em outra empresa',
+     d:'Aportes e mútuos entre empresas do grupo devem aparecer nos dois lados, na mesma data e pelo mesmo valor.'},
+    {k:'R5',t:'3. Regra 5 - lançamentos sem descrição',
+     d:'Sem histórico e sem nominal, nenhuma regra de classificação consegue decidir a natureza do lançamento, que passa a contar como receita ou despesa operacional. É a pendência de maior impacto sobre os números do DFC.'},
+    {k:'R6',t:'4. Regra 6 - blocos sem descrição que fecham com pagamento de empréstimo',
+     d:'Quando a soma das entradas sem descrição de um dia coincide com um pagamento de empréstimo ou a banco na mesma empresa e no mesmo dia, o padrão indica operação de crédito - e não receita operacional.'}
+  ];
+  secs.forEach(function(s){
+    const rs=rows.filter(function(x){return x.r===s.k;});
+    if(!rs.length)return;
+    if(y>700){doc.addPage();y=60;}
+    doc.setFont(undefined,'bold');doc.setFontSize(10.5);
+    doc.text(doc.splitTextToSize(_pdftx(s.t),CW),M,y);y+=14;
+    doc.setFont(undefined,'normal');doc.setFontSize(8.5);
+    const dl=doc.splitTextToSize(_pdftx(s.d),CW);doc.text(dl,M,y);y+=dl.length*10+4;
+    doc.autoTable({startY:y,head:[['Data','Empresa','Descrição no ERP','Entrada','Saída','O que verificar']],
+      body:rs.map(function(x){return [fromISO(x.data),x.emp.slice(0,30),(x.txt||'').slice(0,70),x.ent?BRL(x.ent):'-',x.sai?BRL(x.sai):'-',x.obs].map(_pdftx);}),
+      theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8},styles:{fontSize:7,cellPadding:2.5,overflow:'linebreak'},
+      columnStyles:{0:{cellWidth:46},1:{cellWidth:94},2:{cellWidth:112},3:{halign:'right',cellWidth:56},4:{halign:'right',cellWidth:56}},margin:{left:M,right:M}});
+    y=doc.lastAutoTable.finalY+16;
+  });
+  if(GAL.a4.length){
+    if(y>690){doc.addPage();y=60;}
+    doc.setFont(undefined,'bold');doc.setFontSize(10.5);doc.text(_pdftx('5. Regra 4 - aportes a empresas fora dos arquivos importados (informativo)'),M,y);y+=14;
+    doc.setFont(undefined,'normal');doc.setFontSize(8.5);
+    const agg={};GAL.a4.forEach(function(r){var k=gLabel(r).slice(0,44);if(!agg[k])agg[k]={n:0,v:0};agg[k].n++;agg[k].v+=r.desp+r.rec;});
+    const al=doc.splitTextToSize(_pdftx('Estes lançamentos não têm espelho porque as destinatárias não estão entre os arquivos importados. Atendem à regra 4 e são classificados como Investimento - não são erro.'),CW);
+    doc.text(al,M,y);y+=al.length*10+4;
+    doc.autoTable({startY:y,head:[['Destinatária / histórico','Lçtos','Total']],
+      body:Object.keys(agg).sort(function(a,b){return agg[b].v-agg[a].v;}).map(function(k){return [k,''+agg[k].n,BRL(agg[k].v)].map(_pdftx);}),
+      theme:'grid',headStyles:{fillColor:blue,textColor:255,fontSize:8},styles:{fontSize:7.5,cellPadding:3},
+      columnStyles:{1:{halign:'center',cellWidth:50},2:{halign:'right',cellWidth:130}},margin:{left:M,right:M}});
+    y=doc.lastAutoTable.finalY+16;
+  }
+  if(y>660){doc.addPage();y=60;}
+  doc.setFont(undefined,'bold');doc.setFontSize(10.5);doc.text(_pdftx('Método e abrangência'),M,y);y+=14;
+  doc.setFont(undefined,'normal');doc.setFontSize(8.5);
+  var fps=gAudFps(),novas=0;fps.forEach(function(k){if(!GAUD.has(k))novas++;});
+  const met='Foram processados '+GDATA.length+' lançamentos de '+(nEmp-cob.faltam.length)+' das '+nEmp+' empresas cadastradas, no período '+per+' ('+cob.meses.length+' mês(es))'+
+    (cob.faltam.length?'. Sem lançamentos importados: '+cob.faltam.join(', '):'')+
+    (cob.gaps.length?'. Meses sem movimento no meio do período: '+cob.gaps.map(gMesLabel).join(', '):'')+
+    (cob.defas>=1?'. A base está '+cob.defas+' mês(es) atrás do mês corrente':'')+
+    '. Identificação da empresa pelo nome do arquivo; classificação por histórico e nominal, com casamento de contrapartidas por data e valor. '+
+    (GAUD.size?'Em relação à última conferência registrada ('+(GAUDTS?fromISO(GAUDTS.slice(0,10)):'-')+'), há '+novas+' pendência(s) nova(s).':'Nenhuma conferência anterior registrada.')+
+    ' Pendências verificáveis no aplicativo, aba Grupo > Consistência.';
+  doc.text(doc.splitTextToSize(_pdftx(met),CW),M,y);
+  _ftr(doc);
+  _output(doc,'Apex_Inconsistencias_'+per.replace(/[\/ ]/g,'-')+'.pdf');
+}
+function xlsInconsist(){
+  if(!GDATA||!GDATA.length){alert('Nenhum lançamento importado.');return;}
+  const rows=gPendRows();
+  if(!rows.length){alert('Nenhuma pendência aberta — nada a exportar.');return;}
+  const per=gPendPeriodo(),cob=gCobertura();
+  const head=['Regra','Cód','Empresa','Data','Tipo','Descrição no ERP (como veio)','Entrada (R$)','Saída (R$)','O que verificar','Resposta do gerente','Corrigido? (S/N)'];
+  const aoa=[head];
+  rows.forEach(function(x){aoa.push([x.r,x.cod,x.emp,fromISO(x.data),x.tipo,x.txt,x.ent||0,x.sai||0,x.obs,'','']);});
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:6},{wch:5},{wch:34},{wch:11},{wch:15},{wch:42},{wch:15},{wch:15},{wch:70},{wch:40},{wch:15}];
+  ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length,c:head.length-1}})};
+  ws['!freeze']={xSplit:0,ySplit:1};
+  for(var i=1;i<=rows.length;i++){
+    ['G','H'].forEach(function(c){var cell=ws[c+(i+1)];if(cell&&typeof cell.v==='number')cell.z='#,##0.00';});
+  }
+  const info=[
+    ['Apex Engenharia — pendências do fluxo de caixa do grupo'],
+    ['Período importado', per],
+    ['Lançamentos processados', GDATA.length],
+    ['Empresas com lançamentos', Object.keys(GEMP).length-cob.faltam.length+' de '+Object.keys(GEMP).length],
+    ['Gerado em', new Date().toLocaleString('pt-BR')],
+    [''],
+    ['Como usar'],
+    ['Preencher a coluna "Resposta do gerente" com o histórico correto ou a explicação de cada pendência,'],
+    ['corrigir no UAU!, reexportar o arquivo da empresa e reimportar no app (aba Grupo).'],
+    [''],
+    ['O que cada regra significa'],
+    ['R1','Transferência entre contas sem contrapartida no mesmo dia, na mesma empresa.'],
+    ['R2','Aporte ou mútuo que aparece em uma empresa e não espelha na outra.'],
+    ['R5','Lançamento sem histórico e sem nominal — entra como operacional por omissão.'],
+    ['R6','Bloco de entradas sem descrição cuja soma fecha com um pagamento de empréstimo do mesmo dia.']
+  ];
+  const wsi=XLSX.utils.aoa_to_sheet(info);
+  wsi['!cols']=[{wch:26},{wch:95}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,wsi,'Leia-me');
+  XLSX.utils.book_append_sheet(wb,ws,'Pendências');
+  XLSX.writeFile(wb,'Apex_Pendencias_'+per.replace(/[\/ ]/g,'-')+'.xlsx');
 }
 /* ============== FIM VERIFICADOR ============== */
 
