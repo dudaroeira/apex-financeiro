@@ -617,7 +617,7 @@ function extract(t){
 }
 /* ==================== ÁREA GRUPO (fluxo de caixa das empresas) ==================== */
 let GDATA=null,GEMP={},GSEL='all',GPER='mes',GALERTS=false,gchart=null,GBUSY=false;
-let GPREV=[],GALL=[],GBIPREV=false,GMETP={};
+let GPREV=[],GPREVU=[],GPREVD=[],GPREVSOBRE=0,GALL=[],GBIPREV=false,GMETP={};
 let GRC={},GRCN=0,GRCROWS=[];
 let GLEG=false;
 function gtoggleLeg(){GLEG=!GLEG;render();}
@@ -800,10 +800,27 @@ async function loadGrupo(){
        eliminar dentro de cada um é o correto, não uma aproximação. A prévia nunca entra
        em GDATA — é ela que segura auditoria, verificador, extrato e PDFs longe da prévia. */
     GDATA=all.filter(function(r){return r.origem!=='prev';});
-    GPREV=all.filter(function(r){return r.origem==='prev';});
     parear(GDATA);computeElim();computeMet();buildCaps();
-    if(GPREV.length){parear(GPREV);computeElim(GPREV);GMETP=computeMet(null,GPREV).met;}
-    GALL=GDATA.concat(GPREV);
+    /* Fronteira: por empresa, a prévia só vale a partir do dia seguinte ao último dia já
+       conciliado daquela empresa. Assim o gerente pode exportar o ano inteiro sem risco de
+       o mesmo mês ser contado duas vezes. */
+    var lim={};GDATA.forEach(function(r){if(!lim[r.cod]||r.data>lim[r.cod])lim[r.cod]=r.data;});
+    var todaPrev=all.filter(function(r){return r.origem==='prev';});
+    GPREV=todaPrev.filter(function(r){return !lim[r.cod]||r.data>lim[r.cod];});
+    GPREVSOBRE=todaPrev.length-GPREV.length;
+    GPREVU=[];GPREVD=[];GMETP={};
+    if(GPREV.length){
+      parear(GPREV);computeElim(GPREV);computeMet(null,GPREV);
+      /* Em base não conciliada, o que a regra teria de adivinhar fica de fora do gráfico:
+         sem descrição nenhuma, e transferência cuja contraparte ainda não foi lançada. */
+      GPREV.forEach(function(r){
+        r.dv=isSemDesc(r)||(r.cl==='n'&&normU(r.tipo||'').indexOf('TRANSFER')>=0);
+      });
+      GPREVU=GPREV.filter(function(r){return !r.dv;});
+      GPREVD=GPREV.filter(function(r){return r.dv;});
+      if(GPREVU.length)GMETP=computeMet(null,GPREVU).met;
+    }
+    GALL=GDATA.concat(GPREVU);
   }catch(e){GDATA=[];}
   GBUSY=false;
   if(TAB==='grupo')render();
@@ -1140,10 +1157,29 @@ function buildB0(){
 /* A prévia só existe dentro do BI, e só com o seletor ligado. Em qualquer outra aba
    gRows() devolve o conciliado puro — é o que mantém extrato, consistência,
    verificador e PDFs intocados. */
-function biPrevOn(){return TAB==='bi'&&GBIPREV&&GPREV.length>0;}
+function biPrevOn(){return TAB==='bi'&&GBIPREV&&GPREVU.length>0;}
 function gRows(){return biPrevOn()?GALL:(GDATA||[]);}
 function gtogglePrev(){GBIPREV=!GBIPREV;render();}
-function computeMetAll(win){computeMet(win);if(GPREV.length)GMETP=computeMet(win,GPREV).met;}
+function gdrillPrevFora(){
+  var rows=GSEL==='all'?GPREVD:GPREVD.filter(function(x){return x.cod===GSEL;});
+  gdrillShow('Fora dos gráficos','Lançamentos da prévia sem informação suficiente para classificar',rows,'all');
+}
+function biForaCard(){
+  var rows=GSEL==='all'?GPREVD:GPREVD.filter(function(x){return x.cod===GSEL;});
+  if(!rows.length&&!GPREVSOBRE)return '';
+  var h='';
+  if(rows.length){
+    var v=rows.reduce(function(a,r){return a+r.rec+r.desp;},0);
+    var sd=rows.filter(function(r){return isSemDesc(r);}).length;
+    h+='<div class="card" style="border-left:4px solid var(--mut2);padding:9px 11px;margin-bottom:6px;cursor:pointer" onclick="gdrillPrevFora()">'+
+      '<span style="font-size:12px"><b>'+BRL(v)+' em '+rows.length+' lançamento(s) ficaram de fora dos gráficos</b> — '+
+      sd+' sem descrição nenhuma e '+(rows.length-sd)+' transferência(s) cuja contraparte ainda não foi lançada. '+
+      'Em base não conciliada a regra teria de adivinhar, e preferimos não adivinhar. Toque para ver quais.</span></div>';
+  }
+  if(GPREVSOBRE)h+='<div class="note" style="text-align:left;margin-bottom:4px">'+GPREVSOBRE+' lançamento(s) da prévia foram ignorados por já existirem conciliados — cada empresa usa a prévia só a partir do dia seguinte ao seu último dia conciliado.</div>';
+  return h;
+}
+function computeMetAll(win){computeMet(win);if(GPREVU.length)GMETP=computeMet(win,GPREVU).met;}
 function biMet(){
   if(!biPrevOn())return GMET;
   var out={};
@@ -1152,7 +1188,7 @@ function biMet(){
     out[c].recNeg+=GMETP[c].recNeg;out[c].despNeg+=GMETP[c].despNeg;});
   return out;
 }
-function biPrevMeses(){var m={};GPREV.forEach(function(r){m[r.data.slice(0,7)]=1;});return m;}
+function biPrevMeses(){var m={};GPREVU.forEach(function(r){m[r.data.slice(0,7)]=1;});return m;}
 function biUltConc(){var u='';GDATA.forEach(function(r){var k=r.data.slice(0,7);if(k>u)u=k;});return u;}
 function gScopeRows(win){
   const w=win===undefined?gWin():win;const out=[];
@@ -1259,7 +1295,7 @@ function gdrillRender(){
   const lim=rows.slice(0,250);
   document.getElementById('gdList').innerHTML=lim.map(function(r){
     const v=r.rec>0?r.rec:-r.desp;
-    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+(r.origem==='prev'?'<b style="color:var(--amber)">[prévia] </b>':'')+(r.rc?'<b style="color:var(--blue)">[reclassificado] </b>':'')+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
+    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+(r.origem==='prev'?'<b style="color:var(--amber)">[prévia] </b>':'')+(r.rc?'<b style="color:var(--blue)">[reclassificado] </b>':'')+(r.dv?'<b style="color:var(--mut2)">[fora do gráfico] </b>':'')+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
   }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
 }
 function gdrillClose(){document.getElementById('gdrillM').classList.remove('on');}
@@ -1376,12 +1412,12 @@ function biView(){
         '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
         '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>':'');})()+
     (function(){
-      if(!GPREV.length)return '';
+      if(!GPREV.length&&!GPREVSOBRE)return '';
       var mp=Object.keys(biPrevMeses()).sort(),uc=biUltConc();
       return '<div class="toggle" style="margin-top:2px"><span class="'+(GBIPREV?'':'on')+'" onclick="'+(GBIPREV?'gtogglePrev()':'')+'">Só conciliado</span>'+
         '<span class="'+(GBIPREV?'on':'')+'" onclick="'+(GBIPREV?'':'gtogglePrev()')+'">Incluir prévia</span></div>'+
         (GBIPREV
-          ? '<div class="card" style="border-left:4px solid var(--amber);padding:9px 11px;margin-bottom:6px"><span style="font-size:12px"><b style="color:var(--amber)">Prévia ligada.</b> Conciliado até <b>'+gMesLabel(uc)+'</b>; '+(mp.length?gMesLabel(mp[0])+(mp.length>1?' a '+gMesLabel(mp[mp.length-1]):''):'—')+' '+(mp.length>1?'são números preliminares':'é número preliminar')+', ainda sem conciliação bancária — podem mudar. As barras da prévia aparecem esmaecidas e com contorno.</span></div>'
+          ? '<div class="card" style="border-left:4px solid var(--amber);padding:9px 11px;margin-bottom:6px"><span style="font-size:12px"><b style="color:var(--amber)">Prévia ligada.</b> Conciliado até <b>'+gMesLabel(uc)+'</b>; '+(mp.length?gMesLabel(mp[0])+(mp.length>1?' a '+gMesLabel(mp[mp.length-1]):''):'—')+' '+(mp.length>1?'são números preliminares':'é número preliminar')+', ainda sem conciliação bancária — podem mudar. As barras da prévia aparecem esmaecidas e com contorno.</span></div>'+biForaCard()
           : '<div class="note" style="text-align:left;margin-bottom:4px">Há prévia não conciliada disponível ('+(mp.length?gMesLabel(mp[0])+(mp.length>1?' a '+gMesLabel(mp[mp.length-1]):''):'')+'). O conciliado vai até '+gMesLabel(uc)+'.</div>');
     })()+
     '<div class="note" style="text-align:left;margin-bottom:4px">Valores em R$ milhões. Os dois primeiros gráficos mostram a evolução completa; os rankings usam o período selecionado. <b>Toque nas barras</b> para ver os lançamentos; no gráfico de empresas, toque para filtrar o BI.</div>'+
