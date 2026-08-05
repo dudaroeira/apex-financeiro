@@ -174,7 +174,8 @@ canvas{max-width:100%;}
   <p class="hint">Selecione a planilha Excel (.xlsx) — leitura exata — ou o PDF. Pode escolher vários arquivos de uma vez (importação em lote). Confira antes de salvar; datas iguais são substituídas.</p>
   <div class="drop" id="drop" onclick="document.getElementById('pdf').click()"><div id="dropTxt">Toque para escolher a planilha Excel (.xlsx) ou PDF<br><span style="font-size:11px">(ou preencha manualmente)</span></div></div>
   <input type="file" id="pdf" accept=".xlsx,.xls,.csv,application/pdf" multiple style="display:none" onchange="onFile(event)">
-  <input type="file" id="gfiles" accept=".xls,.xlsx" multiple style="display:none" onchange="onGrupoFiles(event)">
+  <input type="file" id="gfiles" accept=".xls,.xlsx" multiple style="display:none" onchange="onGrupoFiles(event,'conc')">
+  <input type="file" id="gfilesPrev" accept=".xls,.xlsx" multiple style="display:none" onchange="onGrupoFiles(event,'prev')">
   <div class="fields">
     <div class="field"><label>Posição em (DD/MM/AAAA)</label><input id="f_date"></div>
     <div class="field"><label>Saldos de</label><input id="f_saldos"></div>
@@ -331,16 +332,16 @@ function render(){
   if(TAB==='painel')m.innerHTML=painel(p,pr);
   else if(TAB==='liquidez')m.innerHTML=liquidez(p);
   else if(TAB==='divida')m.innerHTML=divida(p);
-  else if(TAB==='grupo'){if(GDATA)computeMet(gWin());m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
-  else if(TAB==='bi'){if(GDATA)computeMet(gWin());m.innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();}
+  else if(TAB==='grupo'){if(GDATA)computeMetAll(gWin());m.innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();}
+  else if(TAB==='bi'){if(GDATA)computeMetAll(gWin());m.innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();}
   else m.innerHTML=historico();
   if(TAB==='historico')drawChart();
 }
 function renderEmpty(){
   document.getElementById('posSel').innerHTML='<option>—</option>';
   document.getElementById('prev').disabled=true;document.getElementById('next').disabled=true;
-  if(TAB==='grupo'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
-  if(TAB==='bi'){if(GDATA)computeMet(gWin());document.getElementById('main').innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();return;}
+  if(TAB==='grupo'){if(GDATA)computeMetAll(gWin());document.getElementById('main').innerHTML=grupoView();if(GDATA===null)loadGrupo();else drawGrupoChart();return;}
+  if(TAB==='bi'){if(GDATA)computeMetAll(gWin());document.getElementById('main').innerHTML=biView();if(GDATA===null)loadGrupo();else drawBI();return;}
   document.getElementById('main').innerHTML='<div class="empty">Nenhuma posição cadastrada.'+(isManager?'<br>Toque em + para adicionar.'  :'<br>Aguarde o gerente alimentar.')+'</div>';
 }
 
@@ -616,6 +617,8 @@ function extract(t){
 }
 /* ==================== ÁREA GRUPO (fluxo de caixa das empresas) ==================== */
 let GDATA=null,GEMP={},GSEL='all',GPER='mes',GALERTS=false,gchart=null,GBUSY=false;
+let GPREV=[],GALL=[],GBIPREV=false,GMETP={};
+let GRC={},GRCN=0,GRCROWS=[];
 let GLEG=false;
 function gtoggleLeg(){GLEG=!GLEG;render();}
 function normU(s){return (''+s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
@@ -643,6 +646,21 @@ function classLanc(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
   if(/APORTE.{0,4}CAPITAL|APORTE CAP|\bMUTUO\b/.test(t)||t.indexOf(' P/ ')>=0)return 'ig';
   if(/APLICA|RESGATE/.test(t))return 'bk';
   return 'n';}
+/* --- Reclassificação manual ---------------------------------------------------
+   Para lançamentos que o ERP não vai corrigir. A exceção casa por empresa, data,
+   valor e lado, E só vale enquanto o texto do lançamento continuar sendo o mesmo
+   de quando ela foi criada. Se um dia o histórico for corrigido na origem, a chave
+   deixa de bater e a exceção expira sozinha — não há como ela mascarar dado novo. */
+function rcTxt(r){return normU((r.hist||'')+' '+(r.nominal||'')).replace(/\s+/g,' ').trim();}
+function rcKey(r){return r.cod+'|'+r.data+'|'+(r.desp>0?r.desp:r.rec).toFixed(2)+'|'+(r.desp>0?'d':'r')+'|'+rcTxt(r);}
+function aplicarReclass(rows){
+  GRCN=0;GRCROWS=[];
+  rows.forEach(function(r){
+    var o=GRC[rcKey(r)];
+    if(!o)return;
+    r.cl=o.cl;r.rc=o;GRCN++;GRCROWS.push(r);
+  });
+}
 /* --- auditoria automática: texto útil do lançamento --- */
 function gTxtU(r){return normU((r.hist||'')+' '+(r.nominal||''));}
 function gTClean(r){return gTxtU(r).replace(/N\/A|NAO PERSONALIZADO/g,'').replace(/[^A-Z0-9]/g,'');}
@@ -650,11 +668,17 @@ function gTClean(r){return gTxtU(r).replace(/N\/A|NAO PERSONALIZADO/g,'').replac
    presumida) e o texto não diz nada. Sem texto, o lançamento cai no Operacional por omissão. */
 function isSemDesc(r){return r.cl==='n'&&normU(r.tipo||'').indexOf('TRANSFER')<0&&gTClean(r).length<4;}
 let GELIM=new Set(),GAL={a1:[],a2:[],a4:[],a5:[],a6:[]};
-function computeElim(){
-  GELIM=new Set();GAL={a1:[],a2:[],a4:[],a5:[],a6:[]};
-  if(!GDATA)return;
+/* Recebe o conjunto de lançamentos. Sem argumento, opera sobre o conciliado (GDATA) e
+   grava nos globais de sempre — comportamento idêntico ao de antes. Com argumento
+   (a prévia), devolve o resultado sem encostar nos globais. Cada linha fica marcada
+   com r.el, para o resto do código não depender de índice de array. */
+function computeElim(SRC){
+  var ROWS=SRC||GDATA,elim=new Set(),al={a1:[],a2:[],a4:[],a5:[],a6:[]};
+  if(!SRC){GELIM=elim;GAL=al;}
+  if(!ROWS)return {elim:elim,al:al};
+  ROWS.forEach(function(r){r.el=false;});
   const strongIdx={},anyIdx={};
-  GDATA.forEach(function(r,i){
+  ROWS.forEach(function(r,i){
     if(r.cl==='ti'||r.cl==='soc')return;
     if(r.desp>0){const k=r.data+'|'+r.desp.toFixed(2)+'|d';(anyIdx[k]=anyIdx[k]||[]).push(r.cod);
       if(r.cl==='ig'){(strongIdx[k]=strongIdx[k]||[]).push(r.cod);}}
@@ -662,9 +686,9 @@ function computeElim(){
       if(r.cl==='ig'){(strongIdx[k]=strongIdx[k]||[]).push(r.cod);}}
   });
   const tiday={};
-  GDATA.forEach(function(r,i){
+  ROWS.forEach(function(r,i){
     if(r.cl==='ti'){
-      GELIM.add(i);
+      elim.add(i);r.el=true;
       const k=r.cod+'|'+r.data;if(!tiday[k])tiday[k]=[0,0];tiday[k][0]+=r.desp;tiday[k][1]+=r.rec;
       return;
     }
@@ -674,26 +698,26 @@ function computeElim(){
       const oppSide=r.desp>0?'r':'d';
       const opp=(anyIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
       if(!opp){const t=normU((r.hist||'')+' '+(r.nominal||''));
-        if(/JAX|JR6|\bR26\b|SQNW|ARIA *& *DX|\bREALTY\b|APEX IMOBILI/.test(t)){r.jx=true;GAL.a4.push(r);return;}
-        GAL.a2.push(r);}
-      GELIM.add(i);
+        if(/JAX|JR6|\bR26\b|SQNW|ARIA *& *DX|\bREALTY\b|APEX IMOBILI/.test(t)){r.jx=true;al.a4.push(r);return;}
+        al.a2.push(r);}
+      elim.add(i);r.el=true;
       return;
     }
     if(r.cl==='n'){
       const oppSide=r.desp>0?'r':'d';
       const opp=(strongIdx[r.data+'|'+val+'|'+oppSide]||[]).some(function(c){return c!==r.cod;});
-      if(opp)GELIM.add(i);
+      if(opp){elim.add(i);r.el=true;}
     }
   });
-  for(const k in tiday){const v=tiday[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');GAL.a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
-  GAL.a1.sort(function(a,b){return a.data<b.data?-1:1;});
+  for(const k in tiday){const v=tiday[k];if(Math.abs(v[0]-v[1])>0.01){const p=k.split('|');al.a1.push({cod:p[0],data:p[1],desp:v[0],rec:v[1]});}}
+  al.a1.sort(function(a,b){return a.data<b.data?-1:1;});
   /* ---- R5: lançamentos sem descrição ---- */
-  GDATA.forEach(function(r){if(isSemDesc(r))GAL.a5.push(r);});
-  GAL.a5.sort(function(a,b){return a.data<b.data?-1:1;});
+  ROWS.forEach(function(r){if(isSemDesc(r))al.a5.push(r);});
+  al.a5.sort(function(a,b){return a.data<b.data?-1:1;});
   /* ---- R6: bloco de entradas sem descrição que casa com pagamento de empréstimo/banco
           no mesmo dia e na mesma empresa → provável financiamento lido como operacional ---- */
   var kwd={},bkd={},anyd={};
-  GDATA.forEach(function(r){
+  ROWS.forEach(function(r){
     if(!(r.desp>0))return;
     var k=r.cod+'|'+r.data,t=gTxtU(r);
     if(/AMORTIZA|EMPRESTIM|FINANCIAMENT|BNDES|CAPITAL DE GIRO|CONSORCIO/.test(t))kwd[k]=(kwd[k]||0)+r.desp;
@@ -701,7 +725,7 @@ function computeElim(){
     (anyd[k]=anyd[k]||[]).push(r.desp);
   });
   var g5={};
-  GAL.a5.forEach(function(r){
+  al.a5.forEach(function(r){
     if(!(r.rec>0))return;
     var k=r.cod+'|'+r.data;
     if(!g5[k])g5[k]={cod:r.cod,data:r.data,q:0,s:0};
@@ -714,9 +738,10 @@ function computeElim(){
     else if(lst.some(function(v){return Math.abs(v-g.s)<0.01;}))hit={v:g.s,via:'saída única de mesmo valor no dia',ex:true};
     else if(kw!==undefined&&Math.abs(kw-g.s)<=0.03*g.s)hit={v:kw,via:'pagamento de empréstimo no mesmo dia',ex:false};
     else if(bk!==undefined&&Math.abs(bk-g.s)<=0.03*g.s)hit={v:bk,via:'pagamento a banco no mesmo dia',ex:false};
-    if(hit)GAL.a6.push({cod:g.cod,data:g.data,q:g.q,s:g.s,cv:hit.v,via:hit.via,ex:hit.ex});
+    if(hit)al.a6.push({cod:g.cod,data:g.data,q:g.q,s:g.s,cv:hit.v,via:hit.via,ex:hit.ex});
   }
-  GAL.a6.sort(function(a,b){return a.data<b.data?-1:1;});
+  al.a6.sort(function(a,b){return a.data<b.data?-1:1;});
+  return {elim:elim,al:al};
 }
 /* ---- R8: cobertura da importação ---- */
 function gCobertura(){
@@ -746,19 +771,23 @@ async function loadGrupo(){
     const em=await sb.from('empresas').select('*').order('cod');
     try{const sn=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',1).maybeSingle();
       GSNAP=new Set((((sn||{}).data||{}).payload||{}).fps||[]);GSNAPTS=(((sn||{}).data||{}).updated_at)||null;}catch(e){GSNAP=new Set();GSNAPTS=null;}
+    try{const rc=await sb.from('reclass').select('cod,data,valor,lado,txt,cl,motivo');
+      GRC={};(rc.data||[]).forEach(function(x){GRC[x.cod+'|'+(''+x.data).slice(0,10)+'|'+(+x.valor).toFixed(2)+'|'+x.lado+'|'+(x.txt||'')]=x;});
+    }catch(e){GRC={};}
     try{const sa=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',2).maybeSingle();
       GAUD=new Set((((sa||{}).data||{}).payload||{}).fps||[]);GAUDTS=(((sa||{}).data||{}).updated_at)||null;}catch(e){GAUD=new Set();GAUDTS=null;}
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
-      const {data,error}=await sb.from('lancamentos').select('cod,data,tipo,hist,nominal,obra,desp,rec').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
+      const {data,error}=await sb.from('lancamentos').select('cod,data,tipo,hist,nominal,obra,desp,rec,origem').order('data',{ascending:true}).order('id',{ascending:true}).range(from,from+999);
       if(error)break;
       all=all.concat(data||[]);
       if(!data||data.length<1000)break;
       from+=1000;
     }
     all.forEach(r=>{r.desp=+r.desp;r.rec=+r.rec;r.cl=classLanc(r);});
-    (function(){
+    aplicarReclass(all);
+    function parear(all){
       var idx={};
       function elig(r){if(r.cl!=='n')return false;var t=normU((r.hist||'')+' '+(r.nominal||''));
         return normU(r.tipo||'').indexOf('TRANSFER')>=0 || t.replace(/N\/A|NAO PERSONALIZADO|\s/g,'')==='';}
@@ -766,8 +795,15 @@ async function loadGrupo(){
         var k=r.cod+'|'+r.data+'|'+val+'|'+side;(idx[k]=idx[k]||[]).push(i);});
       for(var k in idx){if(k.slice(-1)!=='d')continue;var kr=k.slice(0,-1)+'r';var ds=idx[k],rs=idx[kr]||[];
         var n=Math.min(ds.length,rs.length);for(var j=0;j<n;j++){all[ds[j]].cl='ti';all[ds[j]].pr=true;all[rs[j]].cl='ti';all[rs[j]].pr=true;}}
-    })();
-    GDATA=all;computeElim();computeMet();buildCaps();
+    }
+    /* conciliado e prévia são conjuntos separados: períodos disjuntos, então parear e
+       eliminar dentro de cada um é o correto, não uma aproximação. A prévia nunca entra
+       em GDATA — é ela que segura auditoria, verificador, extrato e PDFs longe da prévia. */
+    GDATA=all.filter(function(r){return r.origem!=='prev';});
+    GPREV=all.filter(function(r){return r.origem==='prev';});
+    parear(GDATA);computeElim();computeMet();buildCaps();
+    if(GPREV.length){parear(GPREV);computeElim(GPREV);GMETP=computeMet(null,GPREV).met;}
+    GALL=GDATA.concat(GPREV);
   }catch(e){GDATA=[];}
   GBUSY=false;
   if(TAB==='grupo')render();
@@ -789,27 +825,29 @@ function atOf(r){const t=normU((r.hist||'')+' '+(r.nominal||''));
   if(/AMORTIZA|EMPRESTIM|FINANCIAMENT|BNDES|CAPITAL DE GIRO|CONSORCIO/.test(t))return 'fin';
   if(/RENDIMENTO|\bCDB\b|\bLCI\b|IMOBILIZADO|CAPITALIZA/.test(t))return 'inv';
   return 'op';}
-function computeMet(win){
-  GMET={};GDFC={op:[0,0],inv:[0,0],fin:[0,0]};
-  if(!GDATA)return;
-  GDATA.forEach(function(r,i){
+function computeMet(win,SRC,MET){
+  var ROWS=SRC||GDATA,met={},dfc={op:[0,0],inv:[0,0],fin:[0,0]};
+  if(!SRC){GMET=met;GDFC=dfc;}
+  if(!ROWS)return {met:met,dfc:dfc};
+  ROWS.forEach(function(r,i){
     if(win&&r.at!==undefined&&!win(r)){return;}
-    var m=GMET[r.cod];if(!m)m=GMET[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
+    var m=met[r.cod];if(!m)m=met[r.cod]={recNeg:0,despNeg:0,recG:0,despG:0,recS:0,despS:0,aplic:0,dfc:{op:[0,0],inv:[0,0],fin:[0,0]},b:{op:[0,0],invG:[0,0],invA:[0,0],invE:[0,0],finG:[0,0],finS:[0,0],finD:[0,0]}};
     if(r.cl==='ti'){r.at='ti';return;}
-    if(r.cl==='ig'&&r.jx){r.at='inv';m.b.invE[0]+=r.rec;m.b.invE[1]+=r.desp;m.dfc.inv[0]+=r.rec;m.dfc.inv[1]+=r.desp;GDFC.inv[0]+=r.rec;GDFC.inv[1]+=r.desp;return;}
-    var interco=(r.cl==='ig')||(r.cl==='n'&&GELIM.has(i));
+    if(r.cl==='ig'&&r.jx){r.at='inv';m.b.invE[0]+=r.rec;m.b.invE[1]+=r.desp;m.dfc.inv[0]+=r.rec;m.dfc.inv[1]+=r.desp;dfc.inv[0]+=r.rec;dfc.inv[1]+=r.desp;return;}
+    var interco=(r.cl==='ig')||(r.cl==='n'&&r.el);
     if(interco){r.at='ic';m.recG+=r.rec;m.despG+=r.desp;m.dfc.fin[0]+=r.rec;m.dfc.inv[1]+=r.desp;m.b.finG[0]+=r.rec;m.b.invG[1]+=r.desp;return;}
     var at=r.cl==='soc'?'fin':(r.cl==='bk'?'inv':atOf(r));
     if(at==='op'&&normU(r.tipo||'').indexOf('TRANSFER')>=0){at='inv';m.b.invA[0]+=0;}
     r.at=at;
     m.dfc[at][0]+=r.rec;m.dfc[at][1]+=r.desp;
-    GDFC[at][0]+=r.rec;GDFC[at][1]+=r.desp;
+    dfc[at][0]+=r.rec;dfc[at][1]+=r.desp;
     if(at==='op'){m.recNeg+=r.rec;m.despNeg+=r.desp;m.b.op[0]+=r.rec;m.b.op[1]+=r.desp;}
     if(at==='inv'){m.b.invA[0]+=r.rec;m.b.invA[1]+=r.desp;}
     if(at==='fin'){if(r.cl==='soc'){m.b.finS[0]+=r.rec;m.b.finS[1]+=r.desp;}else{m.b.finD[0]+=r.rec;m.b.finD[1]+=r.desp;}}
     if(r.cl==='soc'){m.recS+=r.rec;m.despS+=r.desp;}
     if(r.cl==='bk'){m.aplic+=r.rec+r.desp;}
   });
+  return {met:met,dfc:dfc};
 }
 function dfcCard(d,titulo){
   function ln(nome,v){var net=v[0]-v[1];
@@ -895,7 +933,8 @@ function extratoCard(B,titulo,opts){
     (opts.elimNote?'<div class="note" style="text-align:left">Consolidado do grupo: fluxos entre as 23 empresas são eliminados; sócios e bancos são contrapartes externas.</div>':'');
 }
 function grupoView(){
-  const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>':'';
+  const mgrBtn=isManager?'<button class="btn-p" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfiles\').click()">Importar planilhas</button>'+
+    '<button class="btn-s" style="padding:10px 16px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;" onclick="document.getElementById(\'gfilesPrev\').click()" title="Fluxo ainda não conciliado — aparece só no BI, quando o seletor for ligado">Importar prévia</button>':'';
   if(GDATA===null)return '<h1>Grupo Apex</h1><div class="empty">Carregando lançamentos…</div>';
   if(!GDATA.length)return '<h1>Grupo Apex</h1><div class="empty">Nenhum lançamento importado.'+(isManager?'<br><br>':'<br>Aguarde o gerente alimentar.')+'</div><div style="text-align:center">'+mgrBtn+'</div>';
 
@@ -952,7 +991,7 @@ function grupoView(){
     alerts+='</div><div class="note" style="text-align:left">R1: transferência entre contas deve ter contrapartida no mesmo dia. R2: aporte/mútuo deve espelhar em outra empresa (mesma data e valor). R5: sem histórico nem nominal, a classificação não tem como decidir e o lançamento vira receita/despesa operacional. R6: quando um bloco de entradas sem descrição fecha com um pagamento de empréstimo do mesmo dia, quase sempre é financiamento — confirme antes de fechar o mês. R4: aportes a coligadas de outro grupo econômico — corretos, classificados como Investimento (saída) na DX e no consolidado.</div>';
     alerts+=gAudDelta();
   }
-  alerts+=gCobSection();
+  alerts+=gCobSection()+gReclassSection();
   return '<h1>Grupo Apex</h1>'+
     '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">'+
     '<select onchange="gsel(this.value)" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;">'+opts+'</select>'+mgrBtn+'</div>'+
@@ -1034,7 +1073,9 @@ function parseUau(wb,fname){
   }
   return {cod:cod,emp:emp,saldoIni:saldoIni,periodo:periodo,rows:rows};
 }
-async function onGrupoFiles(ev){
+async function onGrupoFiles(ev,origem){
+  origem=origem||'conc';
+  const ehPrev=origem==='prev';
   const files=[...ev.target.files];ev.target.value='';
   if(!files.length||!isManager)return;
   const note=()=>document.getElementById('gimpNote');
@@ -1057,7 +1098,9 @@ async function onGrupoFiles(ev){
   const bad=parsed.filter(p=>!p.ok);
   let msg='Importar '+parsed.length+' empresa(s)?\n'+parsed.map(p=>'• ['+p.cod+'] '+p.emp+' — '+p.rows.length+' lçtos '+(p.ok?'(validação OK)':'(ATENÇÃO: saldo não confere)')).join('\n');
   if(errs.length)msg+='\n\nNão lidos: '+errs.join(', ');
-  msg+='\n\nOs lançamentos do período de cada empresa serão substituídos.';
+  msg+=ehPrev
+    ? '\n\nSerá importado como PRÉVIA (não conciliado). Aparece só no BI, quando o seletor for ligado, e é descartado sozinho quando o conciliado do mesmo período chegar. Não entra no extrato, na consistência nem nos PDFs.'
+    : '\n\nOs lançamentos conciliados do período de cada empresa serão substituídos — e qualquer prévia do mesmo período será descartada.';
   if(!confirm(msg)){say('Importação cancelada.');return;}
   let done=0;
   for(const p of parsed){
@@ -1065,17 +1108,23 @@ async function onGrupoFiles(ev){
     let d0,d1;
     if(p.periodo){const pp=p.periodo.split(' a ');d0=toISO(pp[0]);d1=toISO(pp[1]);}
     else{const ds=p.rows.map(r=>toISO(r.data)).sort();d0=ds[0];d1=ds[ds.length-1];}
-    const del=await sb.from('lancamentos').delete().eq('cod',p.cod).gte('data',d0).lte('data',d1);
+    /* substitui só dentro da mesma origem: prévia nunca apaga conciliado */
+    const del=await sb.from('lancamentos').delete().eq('cod',p.cod).eq('origem',origem).gte('data',d0).lte('data',d1);
     if(del.error){say('Erro ao limpar ['+p.cod+']: '+del.error.message);return;}
-    const rows=p.rows.map(r=>({cod:p.cod,emp:p.emp,data:toISO(r.data),tipo:r.tipo,nominal:r.nominal.slice(0,180),hist:r.hist.slice(0,400),obra:r.obra.slice(0,180),desp:r.desp,rec:r.rec}));
+    if(!ehPrev){
+      /* chegou o conciliado: a prévia daquele período era andaime, cai fora */
+      const delp=await sb.from('lancamentos').delete().eq('cod',p.cod).eq('origem','prev').gte('data',d0).lte('data',d1);
+      if(delp.error){say('Erro ao descartar prévia ['+p.cod+']: '+delp.error.message);return;}
+    }
+    const rows=p.rows.map(r=>({cod:p.cod,emp:p.emp,data:toISO(r.data),tipo:r.tipo,nominal:r.nominal.slice(0,180),hist:r.hist.slice(0,400),obra:r.obra.slice(0,180),desp:r.desp,rec:r.rec,origem:origem}));
     for(let i=0;i<rows.length;i+=400){
       const ins=await sb.from('lancamentos').insert(rows.slice(i,i+400));
       if(ins.error){say('Erro ao gravar ['+p.cod+']: '+ins.error.message);return;}
     }
-    await sb.from('empresas').upsert({cod:p.cod,emp:p.emp,saldo_ini:p.saldoIni,periodo:p.periodo,updated_at:new Date().toISOString()},{onConflict:'cod'});
+    if(!ehPrev)await sb.from('empresas').upsert({cod:p.cod,emp:p.emp,saldo_ini:p.saldoIni,periodo:p.periodo,updated_at:new Date().toISOString()},{onConflict:'cod'});
     done++;
   }
-  say(done+' empresa(s) importada(s).');
+  say(done+' empresa(s) importada(s)'+(ehPrev?' como prévia — ligue o seletor no BI para ver.':'.'));
   GDATA=null;loadGrupo();
 }
 /* ==================== FIM ÁREA GRUPO ==================== */
@@ -1088,9 +1137,26 @@ function buildB0(){
   for(var c in GMET){var b=GMET[c].b||{};['op','invA','invE','finS','finD'].forEach(function(k){if(b[k]){B0[k][0]+=b[k][0];B0[k][1]+=b[k][1];}});}
   return B0;
 }
+/* A prévia só existe dentro do BI, e só com o seletor ligado. Em qualquer outra aba
+   gRows() devolve o conciliado puro — é o que mantém extrato, consistência,
+   verificador e PDFs intocados. */
+function biPrevOn(){return TAB==='bi'&&GBIPREV&&GPREV.length>0;}
+function gRows(){return biPrevOn()?GALL:(GDATA||[]);}
+function gtogglePrev(){GBIPREV=!GBIPREV;render();}
+function computeMetAll(win){computeMet(win);if(GPREV.length)GMETP=computeMet(win,GPREV).met;}
+function biMet(){
+  if(!biPrevOn())return GMET;
+  var out={};
+  Object.keys(GMET).forEach(function(c){out[c]={recNeg:GMET[c].recNeg,despNeg:GMET[c].despNeg};});
+  Object.keys(GMETP).forEach(function(c){if(!out[c])out[c]={recNeg:0,despNeg:0};
+    out[c].recNeg+=GMETP[c].recNeg;out[c].despNeg+=GMETP[c].despNeg;});
+  return out;
+}
+function biPrevMeses(){var m={};GPREV.forEach(function(r){m[r.data.slice(0,7)]=1;});return m;}
+function biUltConc(){var u='';GDATA.forEach(function(r){var k=r.data.slice(0,7);if(k>u)u=k;});return u;}
 function gScopeRows(win){
   const w=win===undefined?gWin():win;const out=[];
-  (GDATA||[]).forEach(function(r,i){
+  gRows().forEach(function(r,i){
     if(w&&!w(r))return;
     if(GSEL!=='all'&&r.cod!==GSEL)return;
     out.push({r:r,i:i});
@@ -1193,7 +1259,7 @@ function gdrillRender(){
   const lim=rows.slice(0,250);
   document.getElementById('gdList').innerHTML=lim.map(function(r){
     const v=r.rec>0?r.rec:-r.desp;
-    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
+    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+(r.origem==='prev'?'<b style="color:var(--amber)">[prévia] </b>':'')+(r.rc?'<b style="color:var(--blue)">[reclassificado] </b>':'')+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
   }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
 }
 function gdrillClose(){document.getElementById('gdrillM').classList.remove('on');}
@@ -1309,6 +1375,15 @@ function biView(){
         '<button onclick="gnav(-1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">◀</button>'+
         '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
         '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>':'');})()+
+    (function(){
+      if(!GPREV.length)return '';
+      var mp=Object.keys(biPrevMeses()).sort(),uc=biUltConc();
+      return '<div class="toggle" style="margin-top:2px"><span class="'+(GBIPREV?'':'on')+'" onclick="'+(GBIPREV?'gtogglePrev()':'')+'">Só conciliado</span>'+
+        '<span class="'+(GBIPREV?'on':'')+'" onclick="'+(GBIPREV?'':'gtogglePrev()')+'">Incluir prévia</span></div>'+
+        (GBIPREV
+          ? '<div class="card" style="border-left:4px solid var(--amber);padding:9px 11px;margin-bottom:6px"><span style="font-size:12px"><b style="color:var(--amber)">Prévia ligada.</b> Conciliado até <b>'+gMesLabel(uc)+'</b>; '+(mp.length?gMesLabel(mp[0])+(mp.length>1?' a '+gMesLabel(mp[mp.length-1]):''):'—')+' '+(mp.length>1?'são números preliminares':'é número preliminar')+', ainda sem conciliação bancária — podem mudar. As barras da prévia aparecem esmaecidas e com contorno.</span></div>'
+          : '<div class="note" style="text-align:left;margin-bottom:4px">Há prévia não conciliada disponível ('+(mp.length?gMesLabel(mp[0])+(mp.length>1?' a '+gMesLabel(mp[mp.length-1]):''):'')+'). O conciliado vai até '+gMesLabel(uc)+'.</div>');
+    })()+
     '<div class="note" style="text-align:left;margin-bottom:4px">Valores em R$ milhões. Os dois primeiros gráficos mostram a evolução completa; os rankings usam o período selecionado. <b>Toque nas barras</b> para ver os lançamentos; no gráfico de empresas, toque para filtrar o BI.</div>'+
     cardCv('A operação está gerando caixa? (resultado operacional por mês)','bi1',190)+
     cardCv('Para onde vai o dinheiro (atividades por mês)','bi2',200)+
@@ -1318,33 +1393,36 @@ function biView(){
     (GSEL==='all'?cardCv('Empresas por resultado operacional · '+gPerLabel(),'bi6',300):'');
 }
 function _biDestroy(){GBICH.forEach(function(c){try{c.destroy();}catch(e){}});GBICH=[];}
-function _mkeys(){const set={};(GDATA||[]).forEach(function(r){set[r.data.slice(0,7)]=1;});return Object.keys(set).sort();}
+function _mkeys(){const set={};gRows().forEach(function(r){set[r.data.slice(0,7)]=1;});return Object.keys(set).sort();}
 function _mlabel(k){const p=k.split('-');return p[1]+'/'+p[0].slice(2);}
 function _short(t,n){t=(''+t);return t.length>n?t.slice(0,n)+'…':t;}
 function drawBI(){
   _biDestroy();
-  if(!GDATA||!GDATA.length)return;
+  if(!gRows().length)return;
   const mk=_mkeys();
   const inScope=function(r){return GSEL==='all'||r.cod===GSEL;};
   // bi1: op net per month
+  const PMES=biPrevOn()?biPrevMeses():{};
+  const fade=function(cor,k){return PMES[k]?cor.replace('#','')&&{'#1D9E75':'rgba(29,158,117,.38)','#E24B4A':'rgba(226,75,74,.38)','#378ADD':'rgba(55,138,221,.38)','#EF9F27':'rgba(239,159,39,.38)'}[cor]||cor:cor;};
+  const bordas=function(mk,cores){return mk.map(function(k,i){return PMES[k]?(typeof cores==='function'?cores(k,i):cores):'transparent';});};
   const opm={};mk.forEach(function(k){opm[k]=0;});
-  GDATA.forEach(function(r){if(!inScope(r)||r.at!=='op')return;opm[r.data.slice(0,7)]+=r.rec-r.desp;});
+  gRows().forEach(function(r){if(!inScope(r)||r.at!=='op')return;opm[r.data.slice(0,7)]+=r.rec-r.desp;});
   const c1=document.getElementById('bi1');
-  if(c1){GBICH.push(new Chart(c1,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[{data:mk.map(function(k){return opm[k]/1e6;}),backgroundColor:mk.map(function(k){return opm[k]>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index];var rows=GDATA.filter(function(r){return inScope(r)&&r.at==='op'&&r.data.slice(0,7)===k;});gdrillShow('Operacional '+_mlabel(k),rows.length+' lançamentos',rows,opm[k]>=0?'in':'out');},plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
+  if(c1){GBICH.push(new Chart(c1,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[{data:mk.map(function(k){return opm[k]/1e6;}),backgroundColor:mk.map(function(k){return fade(opm[k]>=0?'#1D9E75':'#E24B4A',k);}),borderColor:bordas(mk,function(k){return opm[k]>=0?'#1D9E75':'#E24B4A';}),borderWidth:2}]},options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index];var rows=gRows().filter(function(r){return inScope(r)&&r.at==='op'&&r.data.slice(0,7)===k;});gdrillShow('Operacional '+_mlabel(k),rows.length+' lançamentos',rows,opm[k]>=0?'in':'out');},plugins:{legend:{display:false}},scales:{y:{ticks:{callback:function(v){return v+' MM';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}}));}
   // bi2: activities per month (nets)
   const act={op:{},inv:{},fin:{}};mk.forEach(function(k){act.op[k]=0;act.inv[k]=0;act.fin[k]=0;});
-  GDATA.forEach(function(r){if(!inScope(r))return;const k=r.data.slice(0,7);
+  gRows().forEach(function(r){if(!inScope(r))return;const k=r.data.slice(0,7);
     if(r.at==='op')act.op[k]+=r.rec-r.desp;
     else if(r.at==='inv')act.inv[k]+=r.rec-r.desp;
     else if(r.at==='fin')act.fin[k]+=r.rec-r.desp;
     else if(r.at==='ic'&&GSEL!=='all'){act.fin[k]+=r.rec;act.inv[k]-=r.desp;}});
   const c2=document.getElementById('bi2');
   if(c2){GBICH.push(new Chart(c2,{type:'bar',data:{labels:mk.map(_mlabel),datasets:[
-    {label:'Operacional',data:mk.map(function(k){return act.op[k]/1e6;}),backgroundColor:'#1D9E75'},
-    {label:'Investimento',data:mk.map(function(k){return act.inv[k]/1e6;}),backgroundColor:'#378ADD'},
-    {label:'Financiamento',data:mk.map(function(k){return act.fin[k]/1e6;}),backgroundColor:'#EF9F27'}]},
+    {label:'Operacional',data:mk.map(function(k){return act.op[k]/1e6;}),backgroundColor:mk.map(function(k){return fade('#1D9E75',k);}),borderColor:bordas(mk,'#1D9E75'),borderWidth:2},
+    {label:'Investimento',data:mk.map(function(k){return act.inv[k]/1e6;}),backgroundColor:mk.map(function(k){return fade('#378ADD',k);}),borderColor:bordas(mk,'#378ADD'),borderWidth:2},
+    {label:'Financiamento',data:mk.map(function(k){return act.fin[k]/1e6;}),backgroundColor:mk.map(function(k){return fade('#EF9F27',k);}),borderColor:bordas(mk,'#EF9F27'),borderWidth:2}]},
     options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index];var ds=els[0].datasetIndex;var nome=['Operacional','Investimento','Financiamento'][ds];
-    var rows=GDATA.filter(function(r){if(!inScope(r)||r.data.slice(0,7)!==k)return false;
+    var rows=gRows().filter(function(r){if(!inScope(r)||r.data.slice(0,7)!==k)return false;
       if(ds===0)return r.at==='op';
       if(ds===1)return r.at==='inv'||(r.at==='ic'&&GSEL!=='all'&&r.desp>0);
       return r.at==='fin'||(r.at==='ic'&&GSEL!=='all'&&r.rec>0);});
@@ -1364,7 +1442,7 @@ function drawBI(){
   // bi6: empresas por resultado operacional (consolidado)
   const c6=document.getElementById('bi6');
   if(c6&&GSEL==='all'){
-    const list=Object.keys(GMET).map(function(c){return {c:c,v:GMET[c].recNeg-GMET[c].despNeg};}).sort(function(a,b){return b.v-a.v;});
+    const MM=biMet();const list=Object.keys(MM).map(function(c){return {c:c,v:MM[c].recNeg-MM[c].despNeg};}).sort(function(a,b){return b.v-a.v;});
     GBICH.push(new Chart(c6,{type:'bar',data:{labels:list.map(function(x){return x.c+' '+_short((GEMP[x.c]||{}).emp||'',16);}),datasets:[{data:list.map(function(x){return x.v/1e6;}),backgroundColor:list.map(function(x){return x.v>=0?'#1D9E75':'#E24B4A';})}]},options:{onClick:function(e,els){if(!els.length)return;gsel(list[els[0].index].c);},indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:function(v){return v+' MM';},font:{size:9}}},y:{ticks:{font:{size:9}}}}}}));
   }
 }
@@ -1377,14 +1455,16 @@ const GRULES={ti_hist:'Transferência entre contas (texto)',ti_par:'Par interno 
   coligadas:'Aportes a coligadas (JAX/Realty…)',soc:'Fluxo com sócios (PF)',
   aplica:'Aplicações/resgates (texto)',transf_sem_par:'Transferência sem par → aplicação',
   fin_kw:'Empréstimos/amortizações (texto)',inv_kw:'Investimento por texto (CDB/rendimento…)',
-  sem_desc:'Sem descrição — caiu no Operacional por omissão'};
+  sem_desc:'Sem descrição — caiu no Operacional por omissão',
+  reclass:'Reclassificado à mão (exceção registrada)'};
 function gtoggleVer(){GVER=!GVER;render();}
 function ruleOf(r,i){
+  if(r.rc)return 'reclass';
   if(r.cl==='ti')return r.pr?'ti_par':'ti_hist';
   if(r.cl==='soc')return 'soc';
   if(r.cl==='bk')return 'aplica';
   if(r.cl==='ig')return r.jx?'coligadas':'intragrupo';
-  if(GELIM.has(i))return 'intragrupo_casado';
+  if(r.el)return 'intragrupo_casado';
   if(isSemDesc(r))return 'sem_desc';
   if(r.at==='fin')return 'fin_kw';
   if(r.at==='inv')return normU(r.tipo||'').indexOf('TRANSFER')>=0?'transf_sem_par':'inv_kw';
@@ -1498,6 +1578,23 @@ function validateAud(){
       if(res.error){alert('Erro ao registrar: '+res.error.message);return;}
       GAUD=new Set(fps);GAUDTS=new Date().toISOString();render();
     });
+}
+function gdrillReclass(){
+  var rows=GSEL==='all'?GRCROWS:GRCROWS.filter(function(x){return x.cod===GSEL;});
+  gdrillShow('Reclassificados à mão',rows.length+' lançamento(s) com classificação corrigida no app',rows,'all');
+}
+function gReclassSection(){
+  var rows=GSEL==='all'?GRCROWS:GRCROWS.filter(function(x){return x.cod===GSEL;});
+  if(!rows.length)return '';
+  var tot=rows.reduce(function(a,r){return a+r.rec+r.desp;},0);
+  var mot={};rows.forEach(function(r){var m=(r.rc&&r.rc.motivo)||'';if(m)mot[m]=(mot[m]||0)+1;});
+  return '<div class="sect">Reclassificações manuais</div>'+
+    '<div class="card"><div class="line" style="cursor:pointer" onclick="gdrillReclass()">'+
+    '<span style="font-size:12px">Lançamentos cuja classificação foi corrigida dentro do app<br>'+
+    '<span style="color:var(--mut2)">toque para ver quais</span></span>'+
+    '<span class="v" style="font-size:12px">'+rows.length+' lçtos · '+BRL(tot)+'</span></div>'+
+    Object.keys(mot).map(function(m){return '<div class="line"><span style="font-size:11.5px;color:var(--mut)">'+m+'</span><span class="v" style="font-size:11.5px">'+mot[m]+'×</span></div>';}).join('')+
+    '</div><div class="note" style="text-align:left">O histórico veio vazio do ERP e não será corrigido lá. A exceção está registrada no banco, com motivo e data, e só vale enquanto o texto do lançamento continuar igual — se um dia for descrito na origem, ela expira sozinha e a regra normal volta a decidir.</div>';
 }
 function gCobSection(){
   if(!GDATA||!GDATA.length)return '';
