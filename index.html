@@ -128,6 +128,9 @@ canvas{max-width:100%;}
   body[data-tab="bi"] main{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start;}
   body[data-tab="bi"] main>*{grid-column:1/-1;}
   body[data-tab="bi"] main .biq{grid-column:auto;}
+  body[data-tab="despesas"] main{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start;}
+  body[data-tab="despesas"] main>*{grid-column:1/-1;}
+  body[data-tab="despesas"] main .biq{grid-column:auto;}
 }
 
 </style>
@@ -165,6 +168,7 @@ canvas{max-width:100%;}
     <button data-t="divida" onclick="go('divida')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h12"/></svg>Dívida</button>
     <button data-t="historico" onclick="go('historico')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Histórico</button>
     <button data-t="grupo" onclick="go('grupo')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h2m2 0h2M9 13h2m2 0h2M9 17h2m2 0h2"/></svg>Grupo</button>
+    <button data-t="despesas" onclick="go('despesas')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.2 15.9A10 10 0 1 1 8 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>Despesas</button>
     <button data-t="bi" onclick="go('bi')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>BI</button>
   </nav>
 </div>
@@ -207,6 +211,14 @@ canvas{max-width:100%;}
   <button class="bigbtn" onclick="exportBackup()"><span class="ic">&#8615;</span><span><b>Exportar backup</b><small>Baixa um .json com todas as posições</small></span></button>
   <button class="bigbtn mgrOnly" onclick="document.getElementById('imp').click()"><span class="ic">&#8613;</span><span><b>Importar backup</b><small>Envia posições de um .json para a nuvem</small></span></button>
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
+  <div class="mgrOnly"><div class="msect">DIRETORES (aba Despesas)</div>
+  <div class="note" style="text-align:left;margin:0 0 8px">Cada diretor vê só os centros de custo listados (códigos antes do " - ", ex.: 1AD, 099OB). O usuário precisa existir no Supabase Auth (painel &gt; Authentication).</div>
+  <input id="dirEmail" placeholder="e-mail do diretor" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:6px;">
+  <input id="dirNome" placeholder="nome (opcional)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:6px;">
+  <input id="dirCcs" placeholder="centros de custo: 1AD, 099OB, 1AC" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:6px;">
+  <input id="dirEmps" placeholder="empresas (códigos, opcional; vazio = todas)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:6px;">
+  <button class="btn-p" style="width:100%;padding:10px;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px" onclick="addDiretor()">Salvar diretor</button>
+  <div id="dirList" style="max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;margin-bottom:6px"></div></div>
   <div class="msect" id="manageHdr">POSIÇÕES SALVAS</div>
   <input id="mgFilter" oninput="renderManage()" placeholder="Filtrar por data (ex.: 06/2026)" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-bottom:8px;">
   <div id="manageList" style="max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;"></div>
@@ -291,6 +303,7 @@ function onAuth(session){
   document.querySelectorAll('.mgrOnly').forEach(e=>e.classList.toggle('hidden',!isManager));
   loadCloud();
   subscribe();
+  loadDiretor();
 }
 function subscribe(){
   sb.channel('positions-rt').on('postgres_changes',{event:'*',schema:'public',table:'positions'},()=>loadCloud()).subscribe();
@@ -322,6 +335,7 @@ function setPer(v){HISTPER=v;render();}
 function render(){
   document.body.setAttribute('data-tab',TAB);
   sortData();
+  if(TAB==='despesas'){document.getElementById('fab').classList.add('hidden');const m=document.getElementById('main');if(GDATA)computeMetAll(gWin());m.innerHTML=despesasView();if(GDATA===null)loadGrupo();else drawDespesas();return;}
   if(!DATA.length){renderEmpty();return;}
   if(CUR>=DATA.length)CUR=DATA.length-1;if(CUR<0)CUR=0;
   const p=DATA[CUR],pr=prevOf(CUR);
@@ -429,7 +443,7 @@ async function savePos(){
   closeModal();await loadCloud();CUR=DATA.findIndex(d=>d.date===o.date);render();
 }
 
-function openMenu(){const mf=document.getElementById('mgFilter');if(mf)mf.value='';renderManage();document.getElementById('seekNote').textContent='';document.getElementById('menu').classList.add('on');}
+function openMenu(){const mf=document.getElementById('mgFilter');if(mf)mf.value='';renderManage();renderDiretores();document.getElementById('seekNote').textContent='';document.getElementById('menu').classList.add('on');}
 function closeMenu(){document.getElementById('menu').classList.remove('on');}
 function seekDate(v){
   if(!v||!DATA.length)return;const target=+v.replace(/-/g,'');let best=0,bd=Infinity,exact=false;
@@ -771,11 +785,13 @@ async function loadGrupo(){
     const em=await sb.from('empresas').select('*').order('cod');
     try{const sn=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',1).maybeSingle();
       GSNAP=new Set((((sn||{}).data||{}).payload||{}).fps||[]);GSNAPTS=(((sn||{}).data||{}).updated_at)||null;}catch(e){GSNAP=new Set();GSNAPTS=null;}
-    try{const rc=await sb.from('reclass').select('cod,data,valor,lado,txt,cl,motivo');
+    try{const rc=await sb.from('reclass').select('id,cod,data,valor,lado,txt,cl,motivo,nat');
       GRC={};(rc.data||[]).forEach(function(x){GRC[x.cod+'|'+(''+x.data).slice(0,10)+'|'+(+x.valor).toFixed(2)+'|'+x.lado+'|'+(x.txt||'')]=x;});
     }catch(e){GRC={};}
     try{const sa=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',2).maybeSingle();
       GAUD=new Set((((sa||{}).data||{}).payload||{}).fps||[]);GAUDTS=(((sa||{}).data||{}).updated_at)||null;}catch(e){GAUD=new Set();GAUDTS=null;}
+    try{const sn3=await sb.from('regras_snapshot').select('payload,updated_at').eq('id',3).maybeSingle();
+      const nr=(((sn3||{}).data||{}).payload||{}).natureza;NAT_RULES=nr&&nr.length?natCompile(nr):null;NAT_RULES_TS=(((sn3||{}).data||{}).updated_at)||null;}catch(e){NAT_RULES=null;}
     GEMP={};(em.data||[]).forEach(e=>GEMP[e.cod]=e);
     let all=[],from=0;
     while(true){
@@ -823,7 +839,7 @@ async function loadGrupo(){
     GALL=GDATA.concat(GPREVU);
   }catch(e){GDATA=[];}
   GBUSY=false;
-  if(TAB==='grupo')render();
+  if(TAB==='grupo'||TAB==='bi'||TAB==='despesas')render();
 }
 function gbucket(iso){
   if(GPER==='dia')return iso.slice(0,10);
@@ -1157,7 +1173,7 @@ function buildB0(){
 /* A prévia só existe dentro do BI, e só com o seletor ligado. Em qualquer outra aba
    gRows() devolve o conciliado puro — é o que mantém extrato, consistência,
    verificador e PDFs intocados. */
-function biPrevOn(){return TAB==='bi'&&GBIPREV&&GPREVU.length>0;}
+function biPrevOn(){return (TAB==='bi'||TAB==='despesas')&&GBIPREV&&GPREVU.length>0;}
 function gRows(){return biPrevOn()?GALL:(GDATA||[]);}
 function gtogglePrev(){GBIPREV=!GBIPREV;render();}
 function gdrillPrevFora(){
@@ -1295,7 +1311,12 @@ function gdrillRender(){
   const lim=rows.slice(0,250);
   document.getElementById('gdList').innerHTML=lim.map(function(r){
     const v=r.rec>0?r.rec:-r.desp;
-    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+(r.origem==='prev'?'<b style="color:var(--amber)">[prévia] </b>':'')+(r.rc?'<b style="color:var(--blue)">[reclassificado] </b>':'')+(r.dv?'<b style="color:var(--mut2)">[fora do gráfico] </b>':'')+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
+    var natH='';
+    if(GDR.nat){var nt=natDesp(r);var ix=GDR.rows.indexOf(r);
+      natH=isManager?'<select onchange="dSetNat('+ix+',this.value)" style="font-size:10px;border:1px solid '+(NAT_COLOR[nt]||'#999')+';color:'+(NAT_COLOR[nt]||'#999')+';border-radius:6px;padding:1px 3px;margin-right:4px;background:var(--card)"><option value="">auto: '+nt+'</option>'+NAT_ORDER.map(function(n){return '<option value="'+n+'"'+((r.rc&&r.rc.nat)===n?' selected':'')+'>'+n+'</option>';}).join('')+'</select>'
+        :'<b style="font-size:10px;color:'+(NAT_COLOR[nt]||'#999')+'">['+nt+'] </b>';
+      natH+='<span style="color:var(--mut2);font-size:10.5px">'+ccCod(r.obra)+' </span>';}
+    return '<div class="line"><span style="font-size:11.5px">'+fromISO(r.data)+' · <b>'+r.cod+'</b> '+natH+(r.origem==='prev'?'<b style="color:var(--amber)">[prévia] </b>':'')+(r.rc&&!GDR.nat?'<b style="color:var(--blue)">[reclassificado] </b>':'')+(r.dv?'<b style="color:var(--mut2)">[fora do gráfico] </b>':'')+gLabel(r)+'</span><span class="'+(v>=0?'up':'down')+'" style="font-size:11.5px;font-weight:600;white-space:nowrap">'+(v>=0?'+':'−')+' '+BRL(Math.abs(v))+'</span></div>';
   }).join('')||'<div class="line"><span>Nenhum lançamento.</span></div>';
 }
 function gdrillClose(){document.getElementById('gdrillM').classList.remove('on');}
@@ -1783,6 +1804,238 @@ function xlsInconsist(){
   XLSX.writeFile(wb,'Apex_Pendencias_'+per.replace(/[\/ ]/g,'-')+'.xlsx');
 }
 /* ============== FIM VERIFICADOR ============== */
+
+/* ============== DESPESAS (empresa x centro de custo x natureza) ==============
+   Escopo: saídas operacionais (r.at==='op', desp>0), excluindo Cont.Financ.,
+   transferências e intercompany — mesma base do Operacional no DFC do Grupo.
+   O campo `obra` do UAU é o centro de custo (CC). natDesp() dá a natureza por
+   regras (editáveis em regras_snapshot id=3, payload.natureza), com exceção
+   manual por lançamento em reclass.nat. Diretores cadastrados em usuarios_cc
+   enxergam só os seus CCs — o corte é feito no banco (RLS), o app apenas reflete. */
+const NAT_ORDER=['Serviços PJ','Mão de obra PF','Materiais','Impostos/taxas','Folha/encargos','Sócios','Seguros/bancos','Concessionárias','Condomínios','Outros'];
+const NAT_COLOR={'Serviços PJ':'#2E75B6','Mão de obra PF':'#1D9E75','Materiais':'#7A5AF8','Impostos/taxas':'#E24B4A','Folha/encargos':'#0E9AA7','Sócios':'#BA7517','Seguros/bancos':'#EF9F27','Concessionárias':'#6B7686','Condomínios':'#C46BD6','Outros':'#C7CED9'};
+/* Regras validadas em SQL (26/09/2026) sobre 5.842 lançamentos *Pago: 99,8% do valor classificado.
+   Ordem importa: a primeira que casar vence. Texto = normU(nominal + ' ' + hist), sem acento, maiúsculo, trim. */
+const NAT_RULES_DEFAULT=[
+  ['Sócios','FABIANO AROEIRA|FABRICIO AROEIRA|RAFAEL AROEIRA|EDUARDO AROEIRA'],
+  ['Impostos/taxas','MINISTERIO DA FAZENDA|RECEITA|SECRETARIA DE ESTADO DE ECONOMIA|\\bGDF\\b|PREFEITURA|\\bINSS\\b|\\bFGTS\\b|\\bDARF\\b|\\bISS\\b|\\bIPTU\\b|\\bITBI\\b|CARTORIO|JUNTA COMERCIAL|CONSELHO|\\bCREA\\b|SIMPLES NACIONAL'],
+  ['Folha/encargos','SALARIO|\\bFOLHA\\b|RESCISAO|FERIAS|\\b13\\b|\\bVALE\\b|PLANO DE SAUDE|SINDICATO|PENSAO'],
+  ['Condomínios','CONDOMINIO|ASSOCIACAO DE MORADORES'],
+  ['Concessionárias','\\bCEB\\b|NEOENERGIA|CAESB|\\bCLARO\\b|\\bVIVO\\b|\\bTIM S|TELECOM|ENERGIA|SANEAMENTO'],
+  ['Seguros/bancos','SEGURO|ALLIANZ|PORTO |TOKIO|TARIFA|BANCO|CAIXA ECONOMICA|\\bBRB\\b|ITAU|BRADESCO|SANTANDER|SICOOB'],
+  ['Materiais','COMERCIO|MATERIAIS|MATERIAL|DISTRIBUIDORA|FERRAGENS|CONCRETO|CIMENTO|MADEIRA|TINTA|ELETRIC|HIDRAUL|LIMPEZA|MAQUINAS|INDUSTRIA|\\bLOJA\\b|ATACAD'],
+  ['Serviços PJ','SERVICO|ENGENHARIA|CONSTRUTORA|INSTALAC|MANUTENC|CONSULTORIA|ADVOCACIA|ADVOGADO|CONTABIL|TECNOLOGIA|LOCACAO|TRANSPORTE|\\bLTDA\\b|EIRELI|S/A|S\\.A|\\bEPP\\b| ME |\\bCIA\\b|ASSOCIA|EMPREENDIMENTOS|PARTICIPACOES|INCORPORA']
+];
+let NAT_RULES=null,NAT_RULES_TS=null;
+function natCompile(list){var out=[];(list||[]).forEach(function(x){try{out.push({n:x[0],re:new RegExp(x[1])});}catch(e){}});return out;}
+function natTxt(r){return normU((r.nominal||'')+' '+(r.hist||'')).replace(/\s+/g,' ').trim();}
+function natDesp(r){
+  if(r.rc&&r.rc.nat)return r.rc.nat;
+  var t=natTxt(r),R=NAT_RULES||(NAT_RULES=natCompile(NAT_RULES_DEFAULT));
+  for(var i=0;i<R.length;i++){if(R[i].re.test(t))return R[i].n;}
+  if(/^[A-Z]+( [A-Z]+){1,6}$/.test(t))return 'Mão de obra PF';
+  return 'Outros';
+}
+function ccCod(obra){return ((''+(obra||'')).split(' - ')[0]||'').trim();}
+function ccNome(obra){var p=(''+(obra||'')).split(' - ');return p.length>1?p.slice(1).join(' - ').trim():(obra||'(sem CC)');}
+function ccFam(obra){var t=normU(obra||'');
+  var suf=ccCod(obra).replace(/^[0-9]+/,'').toUpperCase();
+  var SUF={AD:'Administração',AC:'Almoxarifado',OB:'Obras',VE:'Vendas',AL:'Aluguéis',MF:'Mov. financeira',ME:'Máquinas/equip.',CB:'Corresp. bancário',PO:'Pós-obra',FA:'Fazenda'};
+  if(SUF[suf])return SUF[suf];
+  if(/POS OBRA/.test(t))return 'Pós-obra';
+  if(/MOVIMENTACAO FINANCEIRA/.test(t))return 'Mov. financeira';
+  if(/ADMINISTRAC/.test(t))return 'Administração';
+  if(/VENDAS/.test(t))return 'Vendas';
+  if(/ALUGUEL/.test(t))return 'Aluguéis';
+  if(/ALMOXARIF/.test(t))return 'Almoxarifado';
+  if(/MAQUINAS/.test(t))return 'Máquinas/equip.';
+  if(/FAZENDA/.test(t))return 'Fazenda';
+  if(/\bOBRA\b/.test(t))return 'Obras';
+  return 'Outros';}
+let DCC='all',DFAM='all',DCH=[],DUSER=null,DMAT=null;
+function dsetCC(v){DCC=v;render();}
+function dsetFam(v){DFAM=v;DCC='all';render();}
+function dIsDesp(r){return r.desp>0&&r.at==='op'&&!/CONT\.?\s*FINANC/.test(normU(r.tipo||''));}
+/* base = todas as despesas do escopo empresa/período (sem filtro de CC), para os controles */
+function dBase(win){
+  const w=win===undefined?gWin():win,out=[];
+  gRows().forEach(function(r){if(!dIsDesp(r))return;if(w&&!w(r))return;if(GSEL!=='all'&&r.cod!==GSEL)return;out.push(r);});
+  return out;
+}
+function dScope(win){return dBase(win).filter(function(r){
+  if(DFAM!=='all'&&ccFam(r.obra)!==DFAM)return false;
+  if(DCC!=='all'&&ccCod(r.obra)!==DCC)return false;return true;});}
+function dAgg(rows,keyFn){const m={};rows.forEach(function(r){const k=keyFn(r);if(!m[k])m[k]={k:k,v:0,n:0,rows:[]};m[k].v+=r.desp;m[k].n++;m[k].rows.push(r);});
+  return Object.keys(m).map(function(k){return m[k];}).sort(function(a,b){return b.v-a.v;});}
+function dPrevWin(){
+  if(GPER==='tudo')return null;const b=gBuckets();const i=b.indexOf(gCurKey());if(i<=0)return null;const k=b[i-1];return function(r){return gbucket(r.data)===k;};
+}
+function dCcLabel(r){var o=(r.obra||'').trim();if(!o||o==='N/A - N/A'||o==='N/A')return '(sem CC)';return o;}
+function despesasView(){
+  if(GDATA===null)return '<h1>Despesas</h1><div class="empty">Carregando…</div>';
+  if(!GDATA.length)return '<h1>Despesas</h1><div class="empty">Nenhum lançamento disponível'+(DUSER?' para os seus centros de custo.':'. Importe as planilhas na aba Grupo.')+'</div>';
+  const codes=Object.keys(GEMP).sort(function(a,b){return +a-+b;});
+  const opts='<option value="all"'+(GSEL==='all'?' selected':'')+'>'+(DUSER?'Todas as minhas empresas':'Consolidado (grupo)')+'</option>'+
+    codes.map(function(c){return '<option value="'+c+'"'+(GSEL===c?' selected':'')+'>'+c+' - '+GEMP[c].emp+'</option>';}).join('');
+  const base=dBase();
+  const fams=dAgg(base,function(r){return ccFam(r.obra);});
+  const ccs=dAgg(base.filter(function(r){return DFAM==='all'||ccFam(r.obra)===DFAM;}),function(r){return ccCod(r.obra)||'(sem CC)';});
+  const rows=dScope();
+  const tot=rows.reduce(function(a,r){return a+r.desp;},0);
+  const pw=dPrevWin();const prevTot=pw?dScope(pw).reduce(function(a,r){return a+r.desp;},0):null;
+  const nOut=rows.filter(function(r){return natDesp(r)==='Outros';}).reduce(function(a,r){return a+r.desp;},0);
+  const cob=tot>0?100*(1-nOut/tot):0;
+  function chip(v,l,fn,on){return '<span class="'+(on?'on':'')+'" onclick="'+fn+'(\''+v+'\')">'+l+'</span>';}
+  function cardCv(t,id,h){return '<div class="biq"><div class="sect">'+t+'</div><div class="card"><canvas id="'+id+'" height="'+(h||200)+'"></canvas></div></div>';}
+  const per=function(v,l){return '<span class="'+(GPER===v?'on':'')+'" onclick="gper(\''+v+'\')">'+l+'</span>';};
+  return '<h1>Despesas — perfil de gastos</h1>'+
+    (DUSER?'<div class="note" style="text-align:left;margin:-6px 0 8px">Visão de <b>'+(DUSER.nome||userEmail)+'</b>: '+DUSER.ccs.length+' centro'+(DUSER.ccs.length===1?'':'s')+' de custo autorizado'+(DUSER.ccs.length===1?'':'s')+'.</div>':'')+
+    '<select onchange="gsel(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:13px;margin-bottom:6px;">'+opts+'</select>'+
+    '<div class="toggle" style="margin-top:6px">'+per('mes','Mês')+per('ano','Ano')+per('tudo','Tudo')+'</div>'+
+    (GPER!=='tudo'?'<div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px;">'+
+      '<button onclick="gnav(-1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">◀</button>'+
+      '<div style="flex:1;text-align:center;font-size:14px;font-weight:600;">'+gPerLabel()+'</div>'+
+      '<button onclick="gnav(1)" style="border:1px solid var(--line);background:var(--card);border-radius:9px;width:34px;height:34px;font-size:14px;cursor:pointer;">▶</button></div>':'')+
+    (fams.length>1?'<div class="toggle" style="margin-top:2px">'+chip('all','Todas as áreas','dsetFam',DFAM==='all')+fams.map(function(f){return chip(f.k,f.k,'dsetFam',DFAM===f.k);}).join('')+'</div>':'')+
+    (ccs.length>1?'<select onchange="dsetCC(this.value)" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;margin-bottom:8px;"><option value="all"'+(DCC==='all'?' selected':'')+'>Todos os centros de custo ('+ccs.length+')</option>'+
+      ccs.map(function(c){var ex=c.rows[0];return '<option value="'+c.k+'"'+(DCC===c.k?' selected':'')+'>'+c.k+' - '+ccNome(ex.obra).slice(0,40)+' · '+MM(c.v).replace('R$ ','')+'</option>';}).join('')+'</select>':'')+
+    (function(){
+      if(!GPREV.length&&!GPREVSOBRE)return '';
+      return '<div class="toggle" style="margin-top:2px"><span class="'+(GBIPREV?'':'on')+'" onclick="'+(GBIPREV?'gtogglePrev()':'')+'">Só conciliado</span>'+
+        '<span class="'+(GBIPREV?'on':'')+'" onclick="'+(GBIPREV?'':'gtogglePrev()')+'">Incluir prévia</span></div>';})()+
+    '<div class="row2 kpis">'+
+      '<div class="kpi"><div class="lbl">Despesas · '+gPerLabel()+'</div><div class="big sm">'+MM(tot)+'</div>'+(prevTot!==null?'<div class="delta '+(tot<=prevTot?'up':'down')+'">'+(prevTot>0?((tot-prevTot)/prevTot*100).toLocaleString('pt-BR',{maximumFractionDigits:1})+'% vs anterior':'—')+'</div>':'')+'</div>'+
+      '<div class="kpi"><div class="lbl">Lançamentos</div><div class="big sm">'+rows.length.toLocaleString('pt-BR')+'</div><div class="delta flat">'+cob.toLocaleString('pt-BR',{maximumFractionDigits:1})+'% com natureza identificada</div></div>'+
+    '</div>'+
+    '<div class="note" style="text-align:left;margin-bottom:4px">Saídas operacionais (sem transferências, intercompany, financiamentos e aportes). Valores em R$ milhões. <b>Toque nas barras e fatias</b> para ver os lançamentos.</div>'+
+    cardCv('Onde o dinheiro sai: centros de custo · '+gPerLabel(),'dp1',Math.min(320,60+Math.min(ccs.length,10)*26))+
+    cardCv('Com o que se gasta: natureza da despesa · '+gPerLabel(),'dp2',230)+
+    cardCv('Evolução mensal por natureza (últimos 12 meses)','dp3',210)+
+    cardCv('Para quem mais se paga · '+gPerLabel(),'dp4',260)+
+    dMatriz(rows)+
+    '<div class="sect">Relatório (PDF) · '+gPerLabel()+'</div>'+
+    '<button class="btn-p" style="width:100%;padding:12px;border:none;border-radius:11px;font-size:13px;font-weight:600;cursor:pointer;" onclick="pdfDespesas()">Perfil de despesas em PDF</button>';
+}
+function dMatriz(rows){
+  const ccs=dAgg(rows,function(r){return ccCod(r.obra)||'(sem CC)';}).slice(0,12);
+  const nats=NAT_ORDER.filter(function(n){return rows.some(function(r){return natDesp(r)===n;});});
+  if(!ccs.length)return '';
+  DMAT={ccs:ccs,nats:nats};
+  const cell={};rows.forEach(function(r){const k=ccCod(r.obra)||'(sem CC)',n=natDesp(r);cell[k+'|'+n]=(cell[k+'|'+n]||0)+r.desp;});
+  const totN={};nats.forEach(function(n){totN[n]=rows.filter(function(r){return natDesp(r)===n;}).reduce(function(a,r){return a+r.desp;},0);});
+  const tot=rows.reduce(function(a,r){return a+r.desp;},0);
+  function k(v){if(!v)return '';var x=v/1e3;return x<1?'<1':x.toLocaleString('pt-BR',{maximumFractionDigits:0});}
+  let h='<div class="sect">Centro de custo × natureza · R$ mil · '+gPerLabel()+'</div><div class="card" style="padding:8px 4px;overflow-x:auto"><table style="border-collapse:collapse;font-size:11px;white-space:nowrap;width:100%">';
+  h+='<tr><th style="text-align:left;padding:6px 8px;color:var(--mut);font-weight:600">CC</th>'+nats.map(function(n){return '<th style="text-align:right;padding:6px 6px;color:'+NAT_COLOR[n]+';font-weight:600">'+n.replace('/','/<br>')+'</th>';}).join('')+'<th style="text-align:right;padding:6px 8px;font-weight:700">Total</th></tr>';
+  ccs.forEach(function(c,ci){h+='<tr style="border-top:1px solid var(--line)"><td style="padding:6px 8px;cursor:pointer" onclick="dDrillCC('+ci+')"><b>'+c.k+'</b> <span style="color:var(--mut)">'+ccNome(c.rows[0].obra).slice(0,22)+'</span></td>'+
+    nats.map(function(n){return '<td style="text-align:right;padding:6px 6px">'+k(cell[c.k+'|'+n])+'</td>';}).join('')+'<td style="text-align:right;padding:6px 8px;font-weight:700">'+k(c.v)+'</td></tr>';});
+  h+='<tr style="border-top:2px solid var(--line)"><td style="padding:6px 8px;font-weight:700">Total</td>'+nats.map(function(n){return '<td style="text-align:right;padding:6px 6px;font-weight:700">'+k(totN[n])+'</td>';}).join('')+'<td style="text-align:right;padding:6px 8px;font-weight:700">'+k(tot)+'</td></tr>';
+  h+='</table>'+(dAgg(rows,function(r){return ccCod(r.obra);}).length>12?'<div class="note">Mostrando os 12 maiores centros de custo.</div>':'')+'</div>';
+  return h;
+}
+let DCC_LIST=[],DNAT_LIST=[],DCPT_LIST=[];
+function dDrillCC(i){const o=(DMAT&&DMAT.ccs[i]);if(o)dDrill(o.k+' - '+ccNome(o.rows[0].obra),o.rows);}
+function dDrill(title,rows){gdrillShow(title,gPerLabel()+' · '+rows.length+' lançamentos · '+MM(rows.reduce(function(a,r){return a+r.desp;},0)),rows,'out');GDR.nat=true;gdrillRender();}
+function _dDestroy(){DCH.forEach(function(c){try{c.destroy();}catch(e){}});DCH=[];}
+function drawDespesas(){
+  _dDestroy();
+  const rows=dScope();if(!rows.length)return;
+  const tick={callback:function(v){return v+' MM';},font:{size:10}};
+  /* dp1: por CC */
+  DCC_LIST=dAgg(rows,function(r){return ccCod(r.obra)||'(sem CC)';});
+  const top=DCC_LIST.slice(0,10);
+  const c1=document.getElementById('dp1');
+  if(c1){DCH.push(new Chart(c1,{type:'bar',data:{labels:top.map(function(o){return _short(o.k+' '+ccNome(o.rows[0].obra),26);}),datasets:[{data:top.map(function(o){return o.v/1e6;}),backgroundColor:'#2E75B6'}]},
+    options:{indexAxis:'y',onClick:function(e,els){if(!els.length)return;var o=top[els[0].index];dDrill(o.k+' - '+ccNome(o.rows[0].obra),o.rows);},plugins:{legend:{display:false}},scales:{x:{ticks:tick},y:{ticks:{font:{size:10}}}}}}));}
+  /* dp2: por natureza */
+  DNAT_LIST=dAgg(rows,natDesp);
+  const c2=document.getElementById('dp2');
+  if(c2){DCH.push(new Chart(c2,{type:'doughnut',data:{labels:DNAT_LIST.map(function(o){return o.k;}),datasets:[{data:DNAT_LIST.map(function(o){return +(o.v/1e6).toFixed(3);}),backgroundColor:DNAT_LIST.map(function(o){return NAT_COLOR[o.k]||'#999';}),borderWidth:1}]},
+    options:{cutout:'58%',onClick:function(e,els){if(!els.length)return;var o=DNAT_LIST[els[0].index];dDrill(o.k,o.rows);},plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,generateLabels:function(ch){var t=DNAT_LIST.reduce(function(a,o){return a+o.v;},0);return DNAT_LIST.map(function(o,i){return {text:o.k+' '+Math.round(100*o.v/t)+'%',fillStyle:NAT_COLOR[o.k]||'#999',index:i};});}}}}}}));}
+  /* dp3: evolução mensal empilhada — ignora o período, respeita empresa/CC/área */
+  const all=dScope(null);const mk=[];const set={};all.forEach(function(r){set[r.data.slice(0,7)]=1;});Object.keys(set).sort().slice(-12).forEach(function(k){mk.push(k);});
+  const nats=NAT_ORDER.filter(function(n){return all.some(function(r){return natDesp(r)===n;});});
+  const c3=document.getElementById('dp3');
+  if(c3&&mk.length){const ds=nats.map(function(n){return {label:n,backgroundColor:NAT_COLOR[n],data:mk.map(function(k){return all.filter(function(r){return r.data.slice(0,7)===k&&natDesp(r)===n;}).reduce(function(a,r){return a+r.desp;},0)/1e6;})};});
+    DCH.push(new Chart(c3,{type:'bar',data:{labels:mk.map(_mlabel),datasets:ds},options:{onClick:function(e,els){if(!els.length)return;var k=mk[els[0].index],n=nats[els[0].datasetIndex];dDrill(n+' · '+_mlabel(k),all.filter(function(r){return r.data.slice(0,7)===k&&natDesp(r)===n;}));},
+      plugins:{legend:{position:'bottom',labels:{font:{size:9},boxWidth:9}}},scales:{x:{stacked:true,ticks:{font:{size:10}}},y:{stacked:true,ticks:tick}}}}));}
+  /* dp4: fornecedores */
+  DCPT_LIST=dAgg(rows,function(r){return gCptKey(r);}).slice(0,10);
+  const c4=document.getElementById('dp4');
+  if(c4){DCH.push(new Chart(c4,{type:'bar',data:{labels:DCPT_LIST.map(function(o){return _short(o.k,24);}),datasets:[{data:DCPT_LIST.map(function(o){return o.v/1e6;}),backgroundColor:DCPT_LIST.map(function(o){return NAT_COLOR[natDesp(o.rows[0])]||'#999';})}]},
+    options:{indexAxis:'y',onClick:function(e,els){if(!els.length)return;var o=DCPT_LIST[els[0].index];dDrill(o.k,o.rows);},plugins:{legend:{display:false}},scales:{x:{ticks:tick},y:{ticks:{font:{size:10}}}}}}));}
+}
+/* reclassificação manual de natureza (gerente) — grava em reclass.nat, mantendo o cl atual */
+async function dSetNat(i,nat){
+  if(!isManager||!GDR)return;const r=GDR.rows[i];if(!r)return;
+  const key={cod:r.cod,data:r.data,valor:+(r.desp>0?r.desp:r.rec).toFixed(2),lado:r.desp>0?'d':'r',txt:rcTxt(r)};
+  const prev=r.rc||{};
+  const row=Object.assign({},key,{cl:prev.cl||r.cl||'n',nat:nat||null,motivo:prev.motivo||('natureza: '+(nat||'automática')),criado_por:userEmail});
+  let q;
+  if(prev.id)q=await sb.from('reclass').update({nat:row.nat,motivo:row.motivo}).eq('id',prev.id).select().maybeSingle();
+  else q=await sb.from('reclass').insert(row).select().maybeSingle();
+  if(q.error){alert('Não foi possível salvar: '+q.error.message);return;}
+  const o=q.data||row;r.rc=o;GRC[rcKey(r)]=o;
+  gdrillRender();render();
+}
+function pdfDespesas(){
+  const rows=dScope();if(!rows.length){alert('Sem despesas no período.');return;}
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4'});
+  const M=40,W=doc.internal.pageSize.getWidth();
+  const tot=rows.reduce(function(a,r){return a+r.desp;},0);
+  doc.setFillColor(31,56,100);doc.rect(0,0,W,72,'F');doc.setTextColor(255);doc.setFont(undefined,'bold');doc.setFontSize(15);
+  doc.text(_pdftx((GSEL==='all'?'Grupo Apex':(GSEL+' - '+(GEMP[GSEL]||{}).emp))+' - Perfil de despesas'),40,32);
+  doc.setFont(undefined,'normal');doc.setFontSize(10);
+  doc.text(_pdftx('Período: '+gPerLabel()+(DFAM!=='all'?'  .  Área: '+DFAM:'')+(DCC!=='all'?'  .  CC: '+DCC:'')+'  .  Saídas operacionais'),40,52);
+  doc.setTextColor(0);
+  _kpi(doc,M,90,(W-2*M-10)/2,56,'DESPESAS NO PERÍODO',_pdftx(BRL(tot)),[46,117,182]);
+  _kpi(doc,M+(W-2*M-10)/2+10,90,(W-2*M-10)/2,56,'LANÇAMENTOS',''+rows.length,[31,56,100]);
+  let y=170;
+  function tab(title,head,body){doc.setFont(undefined,'bold');doc.setFontSize(11);doc.text(_pdftx(title),M,y);y+=8;
+    doc.autoTable({startY:y,margin:{left:M,right:M},head:[head],body:body,styles:{fontSize:8.5,cellPadding:3},headStyles:{fillColor:[46,117,182]},columnStyles:{1:{halign:'right'},2:{halign:'right'}},theme:'grid'});
+    y=doc.lastAutoTable.finalY+22;if(y>720){doc.addPage();y=50;}}
+  const nats=dAgg(rows,natDesp);
+  tab('Por natureza da despesa',['Natureza','R$','%'],nats.map(function(o){return [_pdftx(o.k),_pdftx(BRL(o.v)),(100*o.v/tot).toFixed(1)+'%'];}));
+  const ccs=dAgg(rows,function(r){return dCcLabel(r);}).slice(0,15);
+  tab('Por centro de custo (15 maiores)',['Centro de custo','R$','%'],ccs.map(function(o){return [_pdftx(_short(o.k,48)),_pdftx(BRL(o.v)),(100*o.v/tot).toFixed(1)+'%'];}));
+  const cpt=dAgg(rows,function(r){return gCptKey(r);}).slice(0,15);
+  tab('Maiores fornecedores (15)',['Fornecedor','R$','Natureza'],cpt.map(function(o){return [_pdftx(_short(o.k,40)),_pdftx(BRL(o.v)),_pdftx(natDesp(o.rows[0]))];}));
+  _ftr(doc);
+  _output(doc,'Apex_Despesas_'+gPerLabel().replace(/[\/ ]/g,'-')+'.pdf');
+}
+/* Diretor: usuário cadastrado em usuarios_cc (não gerente) vê só a aba Despesas */
+async function loadDiretor(){
+  DUSER=null;
+  try{const q=await sb.from('usuarios_cc').select('email,nome,ccs,empresas').eq('email',userEmail).maybeSingle();
+    if(q.data&&!isManager)DUSER=q.data;}catch(e){}
+  if(DUSER){
+    document.querySelectorAll('nav button').forEach(function(b){b.style.display=b.dataset.t==='despesas'?'':'none';});
+    var nd=document.querySelector('.navdate');if(nd)nd.style.display='none';
+    document.getElementById('who').innerHTML=userEmail+'<span class="badge view">Diretor</span>';
+    go('despesas');
+  }
+}
+/* Cadastro de diretores (menu do gerente) */
+let DUSERS=[];
+async function renderDiretores(){
+  const el=document.getElementById('dirList');if(!el)return;
+  if(!isManager){el.innerHTML='';return;}
+  try{const q=await sb.from('usuarios_cc').select('*').order('email');DUSERS=q.data||[];}catch(e){DUSERS=[];}
+  el.innerHTML=(DUSERS.map(function(u,i){return '<div class="mrow"><span style="font-size:13px"><b>'+(u.nome||u.email)+'</b><br><span style="color:var(--mut);font-size:11px">'+u.email+' · '+(u.ccs||[]).join(', ')+(u.empresas&&u.empresas.length?' · emp. '+u.empresas.join(','):'')+'</span></span><span class="act"><button class="del" onclick="delDiretor('+i+')" aria-label="Remover">&#128465;</button></span></div>';}).join(''))||'<div class="note" style="text-align:left">Nenhum diretor cadastrado.</div>';
+}
+async function addDiretor(){
+  const em=(document.getElementById('dirEmail').value||'').trim().toLowerCase(),nm=(document.getElementById('dirNome').value||'').trim();
+  const ccs=(document.getElementById('dirCcs').value||'').split(/[,;\s]+/).map(function(s){return s.trim().toUpperCase();}).filter(Boolean);
+  const emps=(document.getElementById('dirEmps').value||'').split(/[,;\s]+/).map(function(s){return s.trim();}).filter(Boolean);
+  if(!em||!ccs.length){alert('Informe e-mail e ao menos um centro de custo.');return;}
+  const q=await sb.from('usuarios_cc').upsert({email:em,nome:nm||null,ccs:ccs,empresas:emps.length?emps:null},{onConflict:'email'});
+  if(q.error){alert('Erro: '+q.error.message);return;}
+  ['dirEmail','dirNome','dirCcs','dirEmps'].forEach(function(id){document.getElementById(id).value='';});
+  renderDiretores();
+}
+async function delDiretor(i){const u=DUSERS[i];if(!u||!confirm('Remover acesso de '+u.email+'?'))return;
+  const q=await sb.from('usuarios_cc').delete().eq('email',u.email);if(q.error){alert('Erro: '+q.error.message);return;}renderDiretores();}
+/* ============== FIM DESPESAS ============== */
 
 boot();
 </script>
